@@ -1,0 +1,197 @@
+# config.yaml — Multi-Model Inference Config
+#
+# Supported model_name values:
+#   flux         → FLUX.1-dev / FLUX.1-schnell  (Black Forest Labs)
+#   sd           → Stable Diffusion 1.x / 2.x   (RunwayML / StabilityAI)
+#   sd3          → Stable Diffusion 3.x          (StabilityAI)
+#   sd3_onlb     → SD3 + ONLB diverse sampler     (this repo)
+#   sd3_peakback → SD3 + PeakBack diverse sampler (this repo)
+#   sana         → SANA                          (NVIDIA)
+#   lumina       → Lumina-T2X                    (Alpha-VLLM)
+#   janus        → Janus / Janus-Pro             (DeepSeek)
+#   cogvideo     → CogVideoX (VIDEO output)      (Zhipu AI)
+#   mini_gemini  → Mini-Gemini (VLM, TEXT output)(CUHK)
+
+# ── Active model ────────────────────────────────────────────────────
+model_name: "sd3_peakback"
+model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
+
+# ── Swap examples (uncomment one block at a time) ────────────────────
+#
+# FLUX:
+# model_name: "flux"
+# model_id:   "black-forest-labs/FLUX.1-dev"
+#
+# SD 1.5:
+# model_name: "sd"
+# model_id:   "runwayml/stable-diffusion-v1-5"
+#
+# SD 2.1:
+# model_name: "sd"
+# model_id:   "stabilityai/stable-diffusion-2-1"
+#
+# SANA:
+# model_name: "sana"
+# model_id:   "Efficient-Large-Model/Sana_1600M_1024px_diffusers"
+#
+# Lumina:
+# model_name: "lumina"
+# model_id:   "Alpha-VLLM/Lumina-Next-SFT-diffusers"
+#
+# Janus:
+# model_name: "janus"
+# model_id:   "deepseek-ai/Janus-Pro-7B"
+#
+# CogVideo (outputs .mp4):
+# model_name: "cogvideo"
+# model_id:   "THUDM/CogVideoX-5b"
+# output:     "output.mp4"
+#
+# Mini-Gemini (outputs .txt):
+# model_name: "mini_gemini"
+# model_id:   "YanweiLi/MGM-7B"
+# output:     "output.txt"
+
+# ── Device & seed ────────────────────────────────────────────────────
+device: "cuda"   # cuda | cpu | mps
+seed:   41       # fallback seed used by non-ONLB models and --seed CLI override
+
+# ── Multi-seed generation (sd3_onlb only) ────────────────────────────
+# Each seed produces one independent diverse image from the same prompt.
+# The model is loaded only once; all seeds share the same weights.
+# Remove or leave empty to fall back to the single `seed` value above.
+seeds:
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+
+
+# ── Prompts (first one is used by inference.py; all used by run_experiment.py) ──
+prompts:
+  - "a yellow food truck parked on the side of a city street."
+
+negative_prompt: "blurry, low quality, ugly, deformed"
+
+# ── Output path ──────────────────────────────────────────────────────
+# For multi-seed runs the seed index is appended automatically, e.g.:
+#   output11_seed41.png, output11_seed42.png, …
+output: "prompt20.png"
+diverse_output_dir:  "outputs/diverse"    # folder for ONLB diverse images
+original_output_dir: "outputs/original"   # folder for original (non-diverse) images
+
+# ── Image generation ─────────────────────────────────────────────────
+generation:
+  height: 512
+  width:  512
+
+# ── Flow / Scheduler (used by sd3, flux, sana, lumina) ───────────────
+flow:
+  num_steps:      50
+  guidance_scale: 4.0
+  solver:         "euler"    # euler | heun
+  t_start:        1.0
+  t_end:          0.0
+
+# ── Model-specific extra kwargs ──────────────────────────────────────
+# These are passed through to the model loader as opts["model_kwargs"].
+# Add any model-specific settings here.
+model_kwargs: {}
+
+# Janus example:
+# model_kwargs:
+#   cfg_weight:  5.0
+#   temperature: 1.0
+#   top_p:       1.0
+
+# CogVideo example:
+# model_kwargs:
+#   num_frames: 49
+#   fps:        8
+
+# Mini-Gemini example (optional image input):
+# model_kwargs:
+#   image_path:     "my_image.jpg"
+#   max_new_tokens: 512
+
+# ── Trajectory saving (run_experiment.py only) ───────────────────────
+save_trajectory: false
+
+# ── Orthogonal Null-Space Langevin Backtracking (ONLB) ───────────────
+# Used when model_name is "sd3_onlb".
+#
+# alpha        : traversal modulation strength α — controls β_k slowdown
+#                β_k = max(0, 1 − α·Δt/σ) when σ > sigma_thresh
+#                higher → slower backward walk in mid-noise regime → more lateral accumulation
+#                recommended: 1.0 – 5.0
+#
+# sigma_thresh : gates β_k activation to high-noise regime (σ > thresh)
+#                recommended: 0.3 – 0.5
+#
+# eta          : Langevin temperature η — stochastic exploration breadth
+#                higher → wider null-space search
+#                recommended: 0.01 – 0.1
+#
+# mu           : CFG push weight — semantic basin escape strength
+#                recommended: 0.01 – 0.1
+#
+# target_cos   : τ ∈ (−1, 0) — minimum angular separation enforced by Phase 3
+#                Phase 3 Case 1: ρ ≤ τ         → no operation (natural escape)
+#                Phase 3 Case 2: ρ > |τ|        → Householder reflection
+#                Phase 3 Case 3: τ < ρ ≤ |τ|   → orthogonal projection (cos=0)
+#
+# save_original: also write the original (non-diverse) image for comparison
+onlb:
+  alpha:         2.0    # traversal modulation strength
+  sigma_thresh:  0.3    # gates β_k to high-noise regime
+  eta:           0.07   # Langevin temperature
+  mu:            0.05   # CFG push weight
+  target_cos:   -0.5    # τ — minimum angular separation
+  sigma_thresh: 0.3
+  diverse_output_dir:  "outputs/diverse"    # folder for ONLB diverse images
+  original_output_dir: "outputs/original"   # folder for original (non-diverse) images
+  save_original: true
+
+# ── PeakBack: Peak-Triggered Null-Space Backtracking ─────────────────
+# Used when model_name is "sd3_peakback".
+#
+# Unlike ONLB (which re-walks the whole trajectory backward per seed),
+# PeakBack profiles ONE forward pass for free, then locally searches at a
+# few well-chosen mid-trajectory points to produce `J` diverse branches
+# from a SINGLE seed — no extra seeds needed for diversity.
+#
+# sigma_lo, sigma_hi : mid-noise band searched for intervention points
+# quantile_alpha      : Eq. 7 escape quantile — u* = Quantile_{1-alpha}(U_k)
+# eta                  : Langevin step size during the local walk
+# K_max                : max walk steps per peak before giving up
+# delta                : Eq. 14 fidelity tolerance (conditional signal floor)
+# theta_max            : caps per-step angular displacement (bounds drift, Corollary 1)
+# J                    : number of diverse branches per seed
+# min_sep              : minimum step-index separation between selected peaks
+# exact_leverage       : false → free finite-difference peak score (default)
+#                        true  → exact gradient-based score (1 extra backward
+#                                pass per candidate step in the band — costlier)
+# save_original        : also write the base (non-diverse) image for comparison
+peakback:
+  sigma_lo:       0.3
+  sigma_hi:       0.7
+  quantile_alpha: 0.2
+  eta:            0.05
+  K_max:          5
+  delta:          0.2
+  theta_max:      0.3
+  J:              2
+  min_sep:        3
+  exact_leverage: false
+  diverse_output_dir:  "outputs/diverse"
+  original_output_dir: "outputs/original"
+  save_original: true
+
+# ── PeakBack swap example ────────────────────────────────────────────
+# model_name: "sd3_peakback"
+# model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
+
+# ── ONLB swap example ────────────────────────────────────────────────
+# model_name: "sd3_onlb"
+# model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
