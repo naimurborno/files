@@ -40,6 +40,13 @@ try:
 except ImportError:
     _PEAKBACK_AVAILABLE = False
 
+# UGILE import — graceful fallback if file not yet on path
+try:
+    from latent_escape_sampler import run_sd3_ugile as _run_sd3_ugile
+    _UGILE_AVAILABLE = True
+except ImportError:
+    _UGILE_AVAILABLE = False
+
 
 # ══════════════════════════════════════════════════════════════════════ #
 #  Registry: model_name → loader function                                #
@@ -517,6 +524,10 @@ def main():
     if _PEAKBACK_AVAILABLE:
         MODEL_REGISTRY["sd3_peakback"] = _run_sd3_peakback
 
+    # Register UGILE runner if available
+    if _UGILE_AVAILABLE:
+        MODEL_REGISTRY["sd3_ugile"] = _run_sd3_ugile
+
     model_name = opts["model_name"].lower().strip()
 
     print(f"[INFO] Model    : {opts['model_name']} ({opts['model_id']})")
@@ -525,7 +536,7 @@ def main():
     print(f"[INFO] Device   : {opts['device']}")
     print(f"[INFO] Output   : {opts['output']}")
 
-    if model_name in ("sd3_onlb", "sd3_peakback"):
+    if model_name in ("sd3_onlb", "sd3_peakback", "sd3_ugile"):
         seeds = opts["seeds"]
         print(f"[INFO] Seeds    : {seeds}  ({len(seeds)} image(s) to generate)")
 

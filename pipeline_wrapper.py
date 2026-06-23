@@ -25,7 +25,7 @@ from diffusers import StableDiffusion3Pipeline, FlowMatchEulerDiscreteScheduler
 from PIL import Image
 
 # from q1_entropy_analysis import Q1EntropyAnalyzer   # ← Q1 addition
-from stochastic_sampler  import StochasticVelocitySampler
+# from stochastic_sampler  import StochasticVelocitySampler
 
 
 class SD3PipelineWrapper:

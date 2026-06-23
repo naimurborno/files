@@ -13,7 +13,7 @@
 #   mini_gemini  → Mini-Gemini (VLM, TEXT output)(CUHK)
 
 # ── Active model ────────────────────────────────────────────────────
-model_name: "sd3_peakback"
+model_name: "sd3_ugile"
 model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
 
 # ── Swap examples (uncomment one block at a time) ────────────────────
@@ -68,9 +68,12 @@ seeds:
   - 45
 
 
+
+
+
 # ── Prompts (first one is used by inference.py; all used by run_experiment.py) ──
 prompts:
-  - "a yellow food truck parked on the side of a city street."
+  - "a photo of an astronaut riding a horse on mars"
 
 negative_prompt: "blurry, low quality, ugly, deformed"
 
@@ -174,19 +177,33 @@ onlb:
 #                                pass per candidate step in the band — costlier)
 # save_original        : also write the base (non-diverse) image for comparison
 peakback:
-  sigma_lo:       0.3
-  sigma_hi:       0.7
-  quantile_alpha: 0.2
-  eta:            0.05
-  K_max:          5
-  delta:          0.2
-  theta_max:      0.3
+  sigma_lo:       0.15
+  sigma_hi:       0.45
+  quantile_alpha: 0.15
+  eta:            1.0
+  K_max:          15
+  theta_max:      0.25
+  delta:          0.5
+  min_sep:        3
   J:              2
   min_sep:        3
   exact_leverage: false
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
   save_original: true
+
+ugile:
+  num_grad_steps:      50      # backward passes for escape direction
+  sigma_lo:            0    # which cached steps to use
+  sigma_hi:            1.0
+  escape_scale:        1.0    # how far to push x_0 along escape direction
+  theta_max:           1.5   # max geodesic angle
+  walk_steps:          10     # split into 10 small steps of 0.06 rad each
+  branch_noise:        0.7    # lateral offset for inter-branch diversity
+  J:                   1      # number of diverse images per seed
+  diverse_output_dir:  "outputs/diverse"
+  original_output_dir: "outputs/original"
+  save_original:       true
 
 # ── PeakBack swap example ────────────────────────────────────────────
 # model_name: "sd3_peakback"
