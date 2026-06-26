@@ -1,0 +1,80 @@
+# config_sana.yaml — SANA + UGILE diverse sampler
+#
+# Mirrors config.yaml's structure exactly (same keys, same schema) so
+# pipeline_wrapper_sana.py / latent_escape_sampler_sana.py can be read
+# with the exact same cfg.get(...) calls as the SD3 versions. Only the
+# *values* differ, tuned for SANA's architecture and the model card's
+# recommended settings.
+
+# ── Active model ────────────────────────────────────────────────────
+model_name: "sana_ugile"
+model_id:   "Efficient-Large-Model/Sana_600M_512px_diffusers"
+
+# Other SANA checkpoints you can drop in here unchanged:
+#   Efficient-Large-Model/Sana_600M_1024px_diffusers   (set height/width: 1024)
+#   Efficient-Large-Model/Sana_1600M_512px_diffusers
+#   Efficient-Large-Model/Sana_1600M_1024px_diffusers
+
+# ── Device & seed ────────────────────────────────────────────────────
+device: "cuda"   # cuda | cpu | mps
+seed:   41
+
+# ── Multi-seed generation ────────────────────────────────────────────
+# Same semantics as config.yaml: model is loaded once, each seed runs
+# one full UGILE profiling pass + escape branch.
+seeds:
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+
+# ── Prompts ───────────────────────────────────────────────────────────
+prompts:
+  - "a photo of an astronaut riding a horse on mars"
+
+negative_prompt: "blurry, low quality, ugly, deformed"
+
+# ── Output path ──────────────────────────────────────────────────────
+output: "prompt20_sana.png"
+diverse_output_dir:  "outputs/diverse"
+original_output_dir: "outputs/original"
+
+# ── Image generation ─────────────────────────────────────────────────
+# Must be divisible by 32 (DC-AE's compression ratio) — 512/32=16 ✔
+generation:
+  height: 512
+  width:  512
+
+# ── Flow / Scheduler ──────────────────────────────────────────────────
+# num_steps / guidance_scale follow SANA's model-card recommendation
+# (20 steps, cfg 4.5) rather than SD3's (50 steps, cfg 4.0) — the
+# architecture is far more efficient per-step, so SD3's defaults would
+# just spend extra compute without much quality gain here.
+flow:
+  num_steps:      20
+  guidance_scale: 4.5
+  solver:         "euler"
+  t_start:        1.0
+  t_end:          0.0
+
+model_kwargs: {}
+
+# ── U-Profile Guided Initial Latent Escape (UGILE) ───────────────────
+# Same fields, same meaning as config.yaml's `ugile:` block — see that
+# file's comments for what each parameter does. Values below are a
+# reasonable starting point for SANA; expect to retune escape_scale /
+# theta_max once you've looked at a few cos_x0 / cos_xN numbers, exactly
+# as you would for SD3.
+ugile:
+  num_grad_steps:      50
+  sigma_lo:            0
+  sigma_hi:            1.0
+  escape_scale:        1.0
+  theta_max:           1.5
+  walk_steps:          10
+  branch_noise:        0.7
+  J:                   1
+  diverse_output_dir:  "outputs/diverse"
+  original_output_dir: "outputs/original"
+  save_original:       true
