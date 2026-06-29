@@ -8,7 +8,7 @@
 
 # ── Active model ────────────────────────────────────────────────────
 model_name: "sana_ugile"
-model_id:   "Efficient-Large-Model/Sana_600M_512px_diffusers"
+model_id:   "Efficient-Large-Model/Sana_1600M_512px_diffusers"
 
 # Other SANA checkpoints you can drop in here unchanged:
 #   Efficient-Large-Model/Sana_600M_1024px_diffusers   (set height/width: 1024)
@@ -29,9 +29,29 @@ seeds:
   - 44
   - 45
 
+
 # ── Prompts ───────────────────────────────────────────────────────────
 prompts:
   - "a photo of an astronaut riding a horse on mars"
+  - "A woman holding a purple umbrella walking in the rain"
+  - "A view of a multi-tiered clock tower with an American flag on the top."
+  - "a sink and a mirror reflecting the many pictures on the wall"
+  - "A man in a kitchen instructing a woman on what to do"
+  - "there are two cups in front of the bathroom mirror"
+  - "A kitchen that appears to be missing a cabinet door"
+  - "Spoon in a bowl of chopped vegetables with butter"
+  - "A large Sonic statue on a beach next to a surf board."
+  - "A vintage wood stove used for cooking or baking."
+  - "A sepia photo of Big Ben in London, seen from below"
+  - "A kite flying through a blue sky with a long tail"
+  - "A small dog is sticking its head out of a backpack"
+  - "A pasta dish with mushrooms and broccoli in a cream sauce"
+  - "a person is skiing down a snowy slope"
+  - "A vintage closeup shows a chair with a toddler with a big smile and a big toy bear seated right next to a second toddler with a semi-smile, holding what appears to be a coin purse"
+  - "Two small frying pans have eggs and a slice of ham on a stove"
+  - "A little girl in a rocking chair holding a teddy bear"
+  - "Lemons, apples, and a coffee cup in an arranged \"still life\"."
+  - "a yellow food truck parked on the side of a city street"
 
 negative_prompt: "blurry, low quality, ugly, deformed"
 
@@ -52,8 +72,8 @@ generation:
 # architecture is far more efficient per-step, so SD3's defaults would
 # just spend extra compute without much quality gain here.
 flow:
-  num_steps:      20
-  guidance_scale: 4.5
+  num_steps:      50
+  guidance_scale: 4
   solver:         "euler"
   t_start:        1.0
   t_end:          0.0
@@ -68,13 +88,15 @@ model_kwargs: {}
 # as you would for SD3.
 ugile:
   num_grad_steps:      50
-  sigma_lo:            0
+  sigma_lo:            -1.0
   sigma_hi:            1.0
   escape_scale:        1.0
-  theta_max:           1.5
+  theta_max:           1.2
   walk_steps:          10
   branch_noise:        0.7
   J:                   1
+  noise_scale:         0.15
+  gamma:               1.6
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
   save_original:       true

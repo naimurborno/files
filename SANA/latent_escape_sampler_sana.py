@@ -80,6 +80,8 @@ class SanaUGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
+        noise_scale     : float = 0.2,
+        gamma           : float = 1.2,
     ):
         self.transformer     = transformer
         self.scheduler        = scheduler
@@ -93,6 +95,8 @@ class SanaUGILESampler:
         self.walk_steps       = walk_steps
         self.J                = J
         self.eps              = eps
+        self.noise_scale      = noise_scale
+        self.gamma            = gamma
 
         f_cfg               = cfg.get("flow", {})
         self.num_steps      = f_cfg.get("num_steps",      20)
@@ -103,10 +107,6 @@ class SanaUGILESampler:
         # (see diffusers/pipelines/sana/pipeline_sana.py). No SD3 analog —
         # default 1.0 keeps this a no-op unless the checkpoint says otherwise.
         self.timestep_scale = getattr(self.transformer.config, "timestep_scale", 1.0)
-
-        print(f"[UGILE-SANA] band=[{sigma_lo},{sigma_hi}]  num_grad_steps={num_grad_steps}  "
-              f"escape_scale={escape_scale}  theta_max={theta_max}  "
-              f"walk_steps={walk_steps}  J={J}  timestep_scale={self.timestep_scale}")
 
     # ================================================================== #
     #  PUBLIC ENTRY  (identical control flow to the SD3 UGILESampler)     #
@@ -121,13 +121,16 @@ class SanaUGILESampler:
     ) -> Dict[str, Any]:
 
         # Phase 1 — forward profiling pass
-        print("\n[UGILE-SANA] ── Phase 1: Forward profiling pass ──")
         cache = self._forward_pass_with_profiling(x0, text_embeddings, attention_mask)
-        print(f"[UGILE-SANA]   U_k range: min={min(cache['U']):.4f}  max={max(cache['U']):.4f}")
-        print(f"[UGILE-SANA]   base x_N  norm={cache['x_N'].norm():.4f}")
+        rng = torch.Generator(device=x0.device)
+        rng.manual_seed(seed * 10000 + 1)   # deterministic per seed
+        noise = torch.randn(x0.shape, generator=rng,
+                            dtype=x0.dtype, device=x0.device)
+        x0 = x0 +  self.noise_scale * noise
+        # Optional: re-normalise so the latent stays on the same energy shell
+        # x0 = x0_input * (x0.norm() / (x0_input.norm() + self.eps))
 
         # Phase 2 — semantic direction from cached velocity field
-        print("\n[UGILE-SANA] ── Phase 2: Computing semantic direction ──")
         N = cache["N"]
         semantic_dir = torch.zeros_like(x0, dtype=torch.float32)
         U_total = sum(cache["U"]) + self.eps
@@ -136,10 +139,8 @@ class SanaUGILESampler:
             diff = (cache["v_cond"][k] - cache["v_uncond"][k]).to(semantic_dir.device)
             semantic_dir += w_k * diff.float()
         semantic_unit = semantic_dir / (semantic_dir.norm() + self.eps)
-        print(f"[UGILE-SANA]   semantic_dir norm={semantic_dir.norm():.6f}")
 
         # Phase 3 — build x_0_new orthogonal to the semantic direction
-        print("\n[UGILE-SANA] ── Phase 3: Building escaped x_0 ──")
         r = x0.float().norm().item()
         rng = torch.Generator(device=x0.device)
         rng.manual_seed(seed * 10000 + 1)
@@ -149,23 +150,22 @@ class SanaUGILESampler:
         noise = noise / (noise.norm() + self.eps)
 
         theta = self.theta_max
-        x0_new = (math.cos(theta) * x0.float() + math.sin(theta) * r * noise)
+        # alpha = self.gamma * math.cos(theta)
+
+        x0_new = ( math.cos(theta) * x0.float() + math.sin(theta) * r * noise)
         x0_new = x0_new.to(x0.dtype)
 
         cos_x0 = torch.nn.functional.cosine_similarity(
             x0_new.reshape(1, -1).float(), x0.float().reshape(1, -1)
         ).item()
-        print(f"[UGILE-SANA]   cos(x0_new, x0) = {cos_x0:.4f}  (expected {math.cos(theta):.4f})")
 
         # Phase 4 — full forward pass from x_0_new
-        print("\n[UGILE-SANA] ── Phase 4: Full forward pass from escaped x_0 ──")
         x_N_diverse = self._full_forward_pass(x0_new, text_embeddings, attention_mask)
 
         cos_xN = torch.nn.functional.cosine_similarity(
             x_N_diverse.reshape(1, -1).float(),
             cache["x_N"].reshape(1, -1).float()
         ).item()
-        print(f"[UGILE-SANA]   cos(x_N_diverse, x_N_base) = {cos_xN:.4f}")
 
         return {
             "original_latents" : cache["x_N"],
@@ -219,9 +219,8 @@ class SanaUGILESampler:
             x = self.scheduler.step(v, t, x).prev_sample
             cached_x[k + 1] = x.detach().float().clone()
 
-            if (k + 1) % 10 == 0 or k == 0:
-                print(f"  [Phase1] step {k+1:>3}/{N} | sigma={cached_sigma[k]:.4f} | "
-                      f"U_k={cached_U[k]:.4f} | mean={x.mean():.4f} | std={x.std():.4f}")
+            if False:  # step-level logging suppressed
+                pass
 
         return {
             "x": cached_x, "v": cached_v,
@@ -232,9 +231,8 @@ class SanaUGILESampler:
 
     # ================================================================== #
     #  PHASE 2 — U-WEIGHTED ESCAPE DIRECTION                              #
-    #  (kept for parity with the SD3 file; unused by run() above there    #
-    #  too — see that file's docstring. Left in so both backbones expose  #
-    #  the same surface / config knobs.)                                  #
+    #  (kept for parity with the SD3 file; unused by run() above —        #
+    #  left in so both backbones expose the same surface / config knobs.) #
     # ================================================================== #
 
     def _compute_escape_direction(self, x0, cache, text_embeddings, attention_mask):
@@ -247,9 +245,6 @@ class SanaUGILESampler:
             band = list(range(N))
 
         selected = band
-        print(f"[UGILE-SANA]   gradient steps selected: {len(selected)} steps  "
-              f"(sigma range {cache['sigma'][selected[0]]:.3f}–"
-              f"{cache['sigma'][selected[-1]]:.3f})")
 
         U_selected = [cache["U"][k] for k in selected]
         U_sum = sum(U_selected) + self.eps
@@ -264,8 +259,6 @@ class SanaUGILESampler:
             grad = self._grad_U_at_xk(x_k, t_k, cache["sigma"][k],
                                        text_embeddings, attention_mask)
             escape_dir = escape_dir + w_k * grad
-            print(f"  [Phase2] step k={k:>3} | U_k={cache['U'][k]:.4f} | "
-                  f"w={w_k:.4f} | grad_norm={grad.norm():.4f}")
 
         return escape_dir
 
@@ -324,16 +317,11 @@ class SanaUGILESampler:
         """Run all N Euler steps from the new initial latent."""
         self.scheduler.set_timesteps(self.num_steps)
         timesteps = self.scheduler.timesteps
-        N = len(timesteps)
         x = x0_new.clone()
 
-        for k, t in enumerate(timesteps):
+        for t in timesteps:
             v = self._velocity_forward(x, t, text_embeddings, attention_mask)
             x = self.scheduler.step(v, t, x).prev_sample
-
-            if (k + 1) % 10 == 0 or k == 0:
-                print(f"  [Phase4] step {k+1:>3}/{N} | "
-                      f"mean={x.mean():.4f} | std={x.std():.4f}")
 
         return x
 
@@ -388,27 +376,21 @@ def run_sana_ugile(opts: dict):
     Drop-in runner for inference.py's MODEL_REGISTRY.
     Set model_name: "sana_ugile" in config.yaml to activate.
 
-    Identical seed/branch/output bookkeeping to run_sd3_ugile — only the
-    wrapper and sampler classes underneath are swapped for SANA.
+    Iterates over all prompts and seeds from config. The model is loaded once
+    and the sampler is reused across all prompts and seeds.
     """
     from pipeline_wrapper_sana import SanaPipelineWrapper
 
-    cfg    = opts.get("_cfg", {})
-    device = opts["device"]
-    seeds  = opts.get("seeds") or [opts["seed"]]
+    cfg     = opts.get("_cfg", {})
+    device  = opts["device"]
+    seeds   = opts.get("seeds") or [opts["seed"]]
+    prompts = cfg.get("prompts") or [opts["prompt"]]
 
     ug_cfg = cfg.get("ugile", {})
 
-    print("\n" + "═" * 60)
-    print("[UGILE-SANA] Loading model (once for all seeds)…")
-    print("═" * 60)
+    print(f"[UGILE-SANA] Loading model (once for all prompts/seeds)…")
     wrapper = SanaPipelineWrapper(cfg, device=device)
     wrapper.load()
-
-    print("\n[UGILE-SANA] Encoding prompt (shared across all seeds)…")
-    prompt_embeds, attention_mask = wrapper.encode_prompt(
-        opts["prompt"], opts["negative_prompt"]
-    )
 
     sampler = SanaUGILESampler(
         transformer     = wrapper.transformer,
@@ -422,6 +404,8 @@ def run_sana_ugile(opts: dict):
         theta_max       = ug_cfg.get("theta_max",       0.8),
         walk_steps      = ug_cfg.get("walk_steps",      10),
         J               = ug_cfg.get("J",               1),
+        noise_scale     = ug_cfg.get("noise_scale",     0.2),
+        gamma           = ug_cfg.get("gamma",           1.2),
     )
 
     base_out        = Path(opts["output"])
@@ -432,55 +416,59 @@ def run_sana_ugile(opts: dict):
     original_folder.mkdir(parents=True, exist_ok=True)
     save_original   = ug_cfg.get("save_original", True)
 
-    def _base_path(seed):
-        stem = base_out.stem + (f"_seed{seed}" if multi_seed else "")
+    def _base_path(prompt_idx, seed):
+        stem = base_out.stem + f"_p{prompt_idx}" + (f"_seed{seed}" if multi_seed else "")
         return original_folder / (stem + "_base" + base_out.suffix)
 
-    def _branch_path(seed, j):
-        stem = base_out.stem + (f"_seed{seed}" if multi_seed else "")
+    def _branch_path(prompt_idx, seed, j):
+        stem = base_out.stem + f"_p{prompt_idx}" + (f"_seed{seed}" if multi_seed else "")
         return diverse_folder / (stem + f"_branch{j}" + base_out.suffix)
 
     records = []
-    for idx, seed in enumerate(seeds):
-        print("\n" + "═" * 60)
-        print(f"[UGILE-SANA] Seed {seed}  ({idx + 1}/{len(seeds)})")
-        print("═" * 60)
+    total = len(prompts) * len(seeds)
+    done  = 0
 
-        latents = wrapper.get_initial_latents(seed=seed)
-        result  = sampler.run(latents, prompt_embeds, attention_mask, seed=seed)
+    for p_idx, prompt in enumerate(prompts):
+        print(f"\n[UGILE-SANA] Prompt {p_idx + 1}/{len(prompts)}: \"{prompt}\"")
+        prompt_embeds, attention_mask = wrapper.encode_prompt(
+            prompt, opts["negative_prompt"]
+        )
 
-        if save_original:
-            base_path = _base_path(seed)
-            wrapper.decode_latents(result["original_latents"]).save(base_path)
-            print(f"[UGILE-SANA] Base image → {base_path}")
+        for seed in seeds:
+            done += 1
+            print(f"[UGILE-SANA]   Generating image {done}/{total}  (seed={seed})")
 
-        for br in result["branches"]:
-            out_path = _branch_path(seed, br["branch_idx"])
-            wrapper.decode_latents(br["latents"]).save(out_path)
-            print(f"[UGILE-SANA] Branch {br['branch_idx']} → {out_path}  "
-                  f"(theta={br['theta']:.3f}, cos_x0={br['cos_x0']:.4f}, "
-                  f"cos_xN={br['cos_xN']:.4f})")
+            latents = wrapper.get_initial_latents(seed=seed)
+            result  = sampler.run(latents, prompt_embeds, attention_mask, seed=seed)
 
-            records.append({
-                "seed"      : seed,
-                "branch"    : br["branch_idx"],
-                "theta"     : br["theta"],
-                "cos_x0"    : br["cos_x0"],
-                "cos_xN"    : br["cos_xN"],
-                "out_path"  : str(out_path),
-            })
+            if save_original:
+                base_path = _base_path(p_idx, seed)
+                wrapper.decode_latents(result["original_latents"]).save(base_path)
+                print(f"[UGILE-SANA]   Base  → {base_path}")
 
-    print("\n" + "═" * 60)
-    print(f"[UGILE-SANA] ── Summary ({len(seeds)} seed(s)) ──")
-    print("═" * 60)
-    header = (f"{'Seed':>6} | {'Br':>3} | {'theta':>6} | "
-              f"{'cos_x0':>7} | {'cos_xN':>7} | Output")
+            for br in result["branches"]:
+                out_path = _branch_path(p_idx, seed, br["branch_idx"])
+                wrapper.decode_latents(br["latents"]).save(out_path)
+                print(f"[UGILE-SANA]   Branch {br['branch_idx']} → {out_path}")
+
+                records.append({
+                    "prompt_idx": p_idx,
+                    "prompt"    : prompt,
+                    "seed"      : seed,
+                    "branch"    : br["branch_idx"],
+                    "theta"     : br["theta"],
+                    "cos_x0"    : br["cos_x0"],
+                    "cos_xN"    : br["cos_xN"],
+                    "out_path"  : str(out_path),
+                })
+
+    print("\n" + "═" * 70)
+    print(f"[UGILE-SANA] Done — {len(prompts)} prompt(s) × {len(seeds)} seed(s) = {total} image(s)")
+    print("═" * 70)
+    header = f"{'P':>2} | {'Seed':>6} | {'Br':>3} | {'cos_x0':>7} | {'cos_xN':>7} | Output"
     print(header)
     print("-" * len(header))
     for r in records:
-        print(f"{r['seed']:>6} | {r['branch']:>3} | {r['theta']:>6.3f} | "
+        print(f"{r['prompt_idx']:>2} | {r['seed']:>6} | {r['branch']:>3} | "
               f"{r['cos_x0']:>7.4f} | {r['cos_xN']:>7.4f} | {r['out_path']}")
-    print("═" * 60)
-    print("[UGILE-SANA] cos_x0: angular distance between original and escaped x_0")
-    print("[UGILE-SANA] cos_xN: visual diversity between base and branch final latent")
-    print("[UGILE-SANA] Target cos_xN range: 0.5–0.85 for meaningful visual diversity")
+    print("═" * 70)

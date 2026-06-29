@@ -72,8 +72,8 @@ class SanaPipelineWrapper:
         # text encoder (Gemma-2) and VAE (DC-AE) need bf16/fp32 to stay
         # numerically stable. This has no SD3 analog — SD3's CLIP/T5/VAE
         # are fine in fp16.
-        self.pipe.vae.to(torch.bfloat16)
-        self.pipe.text_encoder.to(torch.bfloat16)
+        # self.pipe.vae.to(torch.bfloat16)
+        # self.pipe.text_encoder.to(torch.bfloat16)
 
         self.tokenizer    = self.pipe.tokenizer
         self.text_encoder = self.pipe.text_encoder
