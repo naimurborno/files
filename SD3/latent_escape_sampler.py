@@ -49,14 +49,18 @@ Add to config.yaml:
     theta_max:        0.8      # max geodesic angle per branch
     branch_noise:     0.3      # lateral offset scale for inter-branch diversity
     J:                3        # number of diverse branches per seed
+    noise_scale:      0.2      # curvature-scaled background noise magnitude
+    gamma:            1.2      # (reserved) noise shaping exponent
     diverse_output_dir:  "outputs/diverse"
     original_output_dir: "outputs/original"
     save_original:    true
 """
 
+import math
 import torch
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import torch.nn.functional as F
 
 from peakback_core import (
     tweedie_potential,
@@ -82,6 +86,8 @@ class UGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
+        noise_scale     : float = 0.2,
+        gamma           : float = 1.2,
     ):
         self.unet           = unet
         self.scheduler      = scheduler
@@ -95,15 +101,13 @@ class UGILESampler:
         self.walk_steps     = walk_steps
         self.J              = J
         self.eps            = eps
+        self.noise_scale    = noise_scale
+        self.gamma          = gamma
 
         f_cfg               = cfg.get("flow", {})
         self.num_steps      = f_cfg.get("num_steps",      50)
         self.guidance_scale = f_cfg.get("guidance_scale", 7.5)
         self.do_cfg         = self.guidance_scale > 1.0
-
-        print(f"[UGILE] band=[{sigma_lo},{sigma_hi}]  num_grad_steps={num_grad_steps}  "
-              f"escape_scale={escape_scale}  theta_max={theta_max}  "
-              f"walk_steps={walk_steps}  J={J}")
 
     # ================================================================== #
     #  PUBLIC ENTRY                                                        #
@@ -118,58 +122,117 @@ class UGILESampler:
     ) -> Dict[str, Any]:
 
         # Phase 1 — forward profiling pass
-        print("\n[UGILE] ── Phase 1: Forward profiling pass ──")
         cache = self._forward_pass_with_profiling(x0, text_embeddings, pooled_embeddings)
-        print(f"[UGILE]   U_k range: min={min(cache['U']):.4f}  max={max(cache['U']):.4f}")
-        print(f"[UGILE]   base x_N  norm={cache['x_N'].norm():.4f}")
 
-        # Phase 2 — compute semantic direction from cached velocity field
-        # v_cond - v_uncond averaged across all steps = what the model attends to
-        # Moving x_0 orthogonal to this = change appearance without destroying content
-        print("\n[UGILE] ── Phase 2: Computing semantic direction ──")
+        # --- Phase 2 — semantic direction & trajectory analysis ---
         N = cache["N"]
-        semantic_dir = torch.zeros_like(x0, dtype=torch.float32)
-        U_total = sum(cache["U"]) + self.eps
-        for k in range(N):
-            w_k = cache["U"][k] / U_total
-            diff = (cache["v_cond"][k] - cache["v_uncond"][k]).to(semantic_dir.device)
-            semantic_dir += w_k * diff.float()
-        semantic_unit = semantic_dir / (semantic_dir.norm() + self.eps)
-        print(f"[UGILE]   semantic_dir norm={semantic_dir.norm():.6f}")
+        U_vals = torch.tensor(cache["U"], device=x0.device, dtype=torch.float32)
+        U_total = U_vals.sum() + self.eps
+        w = U_vals / U_total
 
-        # Phase 3 — build x_0_new orthogonal to semantic direction
-        # Use a seeded random vector, remove semantic component, normalize to same r
-        print("\n[UGILE] ── Phase 3: Building escaped x_0 ──")
-        r = x0.float().norm().item()
+        semantic_dir = torch.zeros_like(x0, dtype=torch.float32)
+        diffs = []
+        for k in range(N):
+            diff = (cache["v_cond"][k] - cache["v_uncond"][k]).to(x0.device).float()
+            diffs.append(diff)
+            semantic_dir += w[k] * diff
+
+        semantic_unit = semantic_dir / (semantic_dir.norm() + self.eps)
+        s_flat = semantic_unit.flatten()
+
+        # --- High-Level Advanced Noise Injection (Before Geodesic Step) ---
+
+        # A3: U-Profile Curvature (2nd Derivative) as Noise Scale
+        if N > 2:
+            d2U = U_vals[:-2] - 2 * U_vals[1:-1] + U_vals[2:]
+            kappa = d2U.abs().mean().item()
+        else:
+            kappa = 1.0
+
+        epsilon = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
+
+        # A1: Full Trajectory-Covariance-Anchored Noise (Background Diversity)
+        rng_cov = torch.Generator(device=x0.device)
+        rng_cov.manual_seed(seed * 10000 + 0)
+        v_boundary = torch.randn(x0.shape, generator=rng_cov, dtype=torch.float32, device=x0.device).flatten()
+
+        s_flat_for_diff = semantic_dir.flatten()
+        diffs_centered = [(diff.flatten() - s_flat_for_diff) for diff in diffs]
+
+        # Use ALL steps for covariance to ensure robust background variance
+        for _ in range(3):
+            v_next = torch.zeros_like(v_boundary)
+            for k in range(N):
+                dot_product = torch.dot(diffs_centered[k], v_boundary)
+                v_next += w[k] * diffs_centered[k] * dot_product
+
+            v_boundary = v_next
+            v_boundary = v_boundary - torch.dot(v_boundary, s_flat) * s_flat
+            v_boundary = v_boundary / (v_boundary.norm() + self.eps)
+
+        v_boundary = v_boundary.view_as(x0)
+
         rng = torch.Generator(device=x0.device)
         rng.manual_seed(seed * 10000 + 1)
-        noise = torch.randn(x0.shape, generator=rng,
-                            dtype=torch.float32, device=x0.device)
-        # remove semantic component from noise
-        noise = noise - (noise.reshape(-1) @ semantic_unit.reshape(-1)) * semantic_unit
-        noise = noise / (noise.norm() + self.eps)
+        jitter = torch.randn(x0.shape, generator=rng, dtype=torch.float32, device=x0.device)
 
-        # blend: x0_new = cos(theta)*x0 + sin(theta)*r*noise
-        # this is a geodesic step of exactly theta_max radians
-        import math
+        eta = v_boundary + 0.1 * jitter
+
+        # Project eta onto span{x0, s_hat}^\perp
+        x0_flat = x0.float().flatten()
+        eta_flat = eta.flatten()
+        eta_flat = eta_flat - torch.dot(eta_flat, x0_flat) / (torch.dot(x0_flat, x0_flat) + self.eps) * x0_flat
+        eta_flat = eta_flat - torch.dot(eta_flat, s_flat) * s_flat
+        eta = eta_flat.view_as(x0)
+
+        # Normalize and scale noise
+        eta = epsilon * eta / (eta.norm() + self.eps)
+
+        # Add noise to x0 and re-normalize to stay exactly on the sphere (r)
+        r = x0.float().norm().item()
+        x0_perturbed = x0.float() + eta
+        x0_perturbed = x0_perturbed * (r / (x0_perturbed.norm() + self.eps))
+
+        # --- Phase 3 — Geodesic Escape Step from perturbed x0 ---
+        rng2 = torch.Generator(device=x0.device)
+        rng2.manual_seed(seed * 10000 + 2)
+        xi = torch.randn(x0_perturbed.shape, generator=rng2, dtype=torch.float32, device=x0.device)
+
+        # Smooth Structural Low-Frequency Bias (No Mask, Milder Blur)
+        if x0.dim() == 4:
+            B, C, H, W = xi.shape
+            # Downsample to 60% and back up. This smoothly filters out high-frequency texture
+            # noise without creating the pixel-block artifacts a coarser downsample would cause.
+            xi_low = F.interpolate(xi, scale_factor=0.96, mode='bilinear', recompute_scale_factor=False, align_corners=False)
+            xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
+
+            # Blend to preserve some high-frequency detail for natural variation
+            xi = 0.7 * xi_low + 0.3 * xi
+
+        # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
+        xi_flat = xi.flatten()
+        xi_flat = xi_flat - torch.dot(xi_flat, s_flat) * s_flat
+        x0p_flat = x0_perturbed.flatten()
+        xi_flat = xi_flat - torch.dot(xi_flat, x0p_flat) / (torch.dot(x0p_flat, x0p_flat) + self.eps) * x0p_flat
+
+        e_hat = xi_flat.view_as(x0_perturbed)
+        e_hat = e_hat / (e_hat.norm() + self.eps)
+
         theta = self.theta_max
-        x0_new = (math.cos(theta) * x0.float() + math.sin(theta) * r * noise)
+        x0_new = math.cos(theta) * x0_perturbed + math.sin(theta) * r * e_hat
         x0_new = x0_new.to(x0.dtype)
 
         cos_x0 = torch.nn.functional.cosine_similarity(
             x0_new.reshape(1, -1).float(), x0.float().reshape(1, -1)
         ).item()
-        print(f"[UGILE]   cos(x0_new, x0) = {cos_x0:.4f}  (expected {math.cos(theta):.4f})")
 
         # Phase 4 — full forward pass from x_0_new
-        print("\n[UGILE] ── Phase 4: Full forward pass from escaped x_0 ──")
         x_N_diverse = self._full_forward_pass(x0_new, text_embeddings, pooled_embeddings)
 
         cos_xN = torch.nn.functional.cosine_similarity(
             x_N_diverse.reshape(1, -1).float(),
             cache["x_N"].reshape(1, -1).float()
         ).item()
-        print(f"[UGILE]   cos(x_N_diverse, x_N_base) = {cos_xN:.4f}")
 
         return {
             "original_latents" : cache["x_N"],
@@ -223,10 +286,6 @@ class UGILESampler:
             x = self.scheduler.step(v, t, x).prev_sample
             cached_x[k + 1] = x.detach().float().clone()
 
-            if (k + 1) % 10 == 0 or k == 0:
-                print(f"  [Phase1] step {k+1:>3}/{N} | sigma={cached_sigma[k]:.4f} | "
-                      f"U_k={cached_U[k]:.4f} | mean={x.mean():.4f} | std={x.std():.4f}")
-
         return {
             "x": cached_x, "v": cached_v,
             "v_uncond": cached_v_uncond, "v_cond": cached_v_cond,
@@ -251,14 +310,10 @@ class UGILESampler:
         band = [k for k in range(N)
                 if self.sigma_lo <= cache["sigma"][k] <= self.sigma_hi]
         if not band:
-            print("[UGILE]   WARNING: no steps in sigma band, using full trajectory")
             band = list(range(N))
 
         # Use ALL steps in the band
         selected = band
-        print(f"[UGILE]   gradient steps selected: {len(selected)} steps  "
-              f"(sigma range {cache['sigma'][selected[0]]:.3f}–"
-              f"{cache['sigma'][selected[-1]]:.3f})")
 
         U_selected = [cache["U"][k] for k in selected]
         U_sum = sum(U_selected) + self.eps
@@ -273,8 +328,6 @@ class UGILESampler:
             grad = self._grad_U_at_xk(x_k, t_k, cache["sigma"][k],
                                        text_embeddings, pooled_embeddings)
             escape_dir = escape_dir + w_k * grad
-            print(f"  [Phase2] step k={k:>3} | U_k={cache['U'][k]:.4f} | "
-                  f"w={w_k:.4f} | grad_norm={grad.norm():.4f}")
 
         return escape_dir
 
@@ -340,10 +393,6 @@ class UGILESampler:
             v = self._velocity_forward(x, t, text_embeddings, pooled_embeddings)
             x = self.scheduler.step(v, t, x).prev_sample
 
-            if (k + 1) % 10 == 0 or k == 0:
-                print(f"  [Phase4] step {k+1:>3}/{N} | "
-                      f"mean={x.mean():.4f} | std={x.std():.4f}")
-
         return x
 
     # ================================================================== #
@@ -393,27 +442,20 @@ def run_sd3_ugile(opts: dict):
     Drop-in runner for inference.py MODEL_REGISTRY.
     Set model_name: "sd3_ugile" in config.yaml to activate.
 
-    For each seed: one profiling pass → escape direction → J full forward
-    passes from J different modified x_0s. The model is loaded once.
+    Iterates over all prompts and seeds from config. The model is loaded once
+    and the sampler is reused across all prompts and seeds.
     """
     from pipeline_wrapper import SD3PipelineWrapper
 
-    cfg    = opts.get("_cfg", {})
-    device = opts["device"]
-    seeds  = opts.get("seeds") or [opts["seed"]]
+    cfg     = opts.get("_cfg", {})
+    device  = opts["device"]
+    seeds   = opts.get("seeds") or [opts["seed"]]
+    prompts = cfg.get("prompts") or [opts["prompt"]]
 
     ug_cfg = cfg.get("ugile", {})
 
-    print("\n" + "═" * 60)
-    print("[UGILE] Loading model (once for all seeds)…")
-    print("═" * 60)
     wrapper = SD3PipelineWrapper(cfg, device=device)
     wrapper.load()
-
-    print("\n[UGILE] Encoding prompt (shared across all seeds)…")
-    prompt_embeds, pooled_embeds = wrapper.encode_prompt(
-        opts["prompt"], opts["negative_prompt"]
-    )
 
     sampler = UGILESampler(
         unet            = wrapper.transformer,
@@ -427,6 +469,8 @@ def run_sd3_ugile(opts: dict):
         theta_max       = ug_cfg.get("theta_max",       0.8),
         walk_steps      = ug_cfg.get("walk_steps",      10),
         J               = ug_cfg.get("J",               1),
+        noise_scale     = ug_cfg.get("noise_scale",     0.2),
+        gamma           = ug_cfg.get("gamma",           1.2),
     )
 
     base_out        = Path(opts["output"])
@@ -437,55 +481,47 @@ def run_sd3_ugile(opts: dict):
     original_folder.mkdir(parents=True, exist_ok=True)
     save_original   = ug_cfg.get("save_original", True)
 
-    def _base_path(seed):
-        stem = base_out.stem + (f"_seed{seed}" if multi_seed else "")
+    def _base_path(prompt_idx, seed):
+        stem = base_out.stem + f"_p{prompt_idx}" + (f"_seed{seed}" if multi_seed else "")
         return original_folder / (stem + "_base" + base_out.suffix)
 
-    def _branch_path(seed, j):
-        stem = base_out.stem + (f"_seed{seed}" if multi_seed else "")
+    def _branch_path(prompt_idx, seed, j):
+        stem = base_out.stem + f"_p{prompt_idx}" + (f"_seed{seed}" if multi_seed else "")
         return diverse_folder / (stem + f"_branch{j}" + base_out.suffix)
 
     records = []
-    for idx, seed in enumerate(seeds):
-        print("\n" + "═" * 60)
-        print(f"[UGILE] Seed {seed}  ({idx + 1}/{len(seeds)})")
-        print("═" * 60)
+    total = len(prompts) * len(seeds)
+    done  = 0
 
-        latents = wrapper.get_initial_latents(seed=seed)
-        result  = sampler.run(latents, prompt_embeds, pooled_embeds, seed=seed)
+    for p_idx, prompt in enumerate(prompts):
+        prompt_embeds, pooled_embeds = wrapper.encode_prompt(
+            prompt, opts["negative_prompt"]
+        )
 
-        if save_original:
-            base_path = _base_path(seed)
-            wrapper.decode_latents(result["original_latents"]).save(base_path)
-            print(f"[UGILE] Base image → {base_path}")
+        for seed in seeds:
+            done += 1
+            print(f"[UGILE] image {done}/{total}  seed={seed}")
 
-        for br in result["branches"]:
-            out_path = _branch_path(seed, br["branch_idx"])
-            wrapper.decode_latents(br["latents"]).save(out_path)
-            print(f"[UGILE] Branch {br['branch_idx']} → {out_path}  "
-                  f"(theta={br['theta']:.3f}, cos_x0={br['cos_x0']:.4f}, "
-                  f"cos_xN={br['cos_xN']:.4f})")
+            latents = wrapper.get_initial_latents(seed=seed)
+            result  = sampler.run(latents, prompt_embeds, pooled_embeds, seed=seed)
 
-            records.append({
-                "seed"      : seed,
-                "branch"    : br["branch_idx"],
-                "theta"     : br["theta"],
-                "cos_x0"    : br["cos_x0"],
-                "cos_xN"    : br["cos_xN"],
-                "out_path"  : str(out_path),
-            })
+            if save_original:
+                base_path = _base_path(p_idx, seed)
+                wrapper.decode_latents(result["original_latents"]).save(base_path)
 
-    print("\n" + "═" * 60)
-    print(f"[UGILE] ── Summary ({len(seeds)} seed(s)) ──")
-    print("═" * 60)
-    header = (f"{'Seed':>6} | {'Br':>3} | {'theta':>6} | "
-              f"{'cos_x0':>7} | {'cos_xN':>7} | Output")
-    print(header)
-    print("-" * len(header))
-    for r in records:
-        print(f"{r['seed']:>6} | {r['branch']:>3} | {r['theta']:>6.3f} | "
-              f"{r['cos_x0']:>7.4f} | {r['cos_xN']:>7.4f} | {r['out_path']}")
-    print("═" * 60)
-    print("[UGILE] cos_x0: angular distance between original and escaped x_0")
-    print("[UGILE] cos_xN: visual diversity between base and branch final latent")
-    print("[UGILE] Target cos_xN range: 0.5–0.85 for meaningful visual diversity")
+            for br in result["branches"]:
+                out_path = _branch_path(p_idx, seed, br["branch_idx"])
+                wrapper.decode_latents(br["latents"]).save(out_path)
+
+                records.append({
+                    "prompt_idx": p_idx,
+                    "prompt"    : prompt,
+                    "seed"      : seed,
+                    "branch"    : br["branch_idx"],
+                    "theta"     : br["theta"],
+                    "cos_x0"    : br["cos_x0"],
+                    "cos_xN"    : br["cos_xN"],
+                    "out_path"  : str(out_path),
+                })
+
+    return records
