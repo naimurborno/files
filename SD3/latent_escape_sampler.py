@@ -202,7 +202,7 @@ class UGILESampler:
         if x0.dim() == 4:
           B, C, H, W = xi.shape
           # Create a 5x5 Gaussian kernel
-          sigma = 1.5
+          sigma = 0.6
           coords = torch.arange(5, device=x0.device).float() - 2
           gauss_1d = torch.exp(-(coords**2) / (2 * sigma**2))
           gauss_1d = gauss_1d / gauss_1d.sum()
