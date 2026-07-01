@@ -200,14 +200,19 @@ class UGILESampler:
 
         # Smooth Structural Low-Frequency Bias (No Mask, Milder Blur)
         if x0.dim() == 4:
-            B, C, H, W = xi.shape
-            # Downsample to 60% and back up. This smoothly filters out high-frequency texture
-            # noise without creating the pixel-block artifacts a coarser downsample would cause.
-            xi_low = F.interpolate(xi, scale_factor=0.5, mode='bilinear', recompute_scale_factor=False, align_corners=False)
-            xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
-
-            # Blend to preserve some high-frequency detail for natural variation
-            xi = 0.7 * xi_low + 0.3 * xi
+          B, C, H, W = xi.shape
+          # Create a 5x5 Gaussian kernel
+          sigma = 1.5
+          coords = torch.arange(5, device=x0.device).float() - 2
+          gauss_1d = torch.exp(-(coords**2) / (2 * sigma**2))
+          gauss_1d = gauss_1d / gauss_1d.sum()
+          kernel = torch.outer(gauss_1d, gauss_1d).view(1, 1, 5, 5).repeat(C, 1, 1, 1)
+          
+          # Apply depthwise convolution (groups=C) with padding to preserve spatial dims
+          xi_low = F.conv2d(xi, kernel, padding=2, groups=C)
+          
+          # Blend to preserve some high-frequency detail for natural variation
+          xi = 0.7 * xi_low + 0.3 * xi
 
         # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
         xi_flat = xi.flatten()
