@@ -86,7 +86,7 @@ class UGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
-        noise_scale     : float = 20,
+        noise_scale     : float = 15,
         gamma           : float = 1.2,
     ):
         self.unet           = unet
