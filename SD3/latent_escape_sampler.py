@@ -1,10 +1,4 @@
-"""
-latent_escape_sampler.py
-------------------------
-U-Profile Guided Initial Latent Escape (UGILE)
-(Tuned for SD3 - Artifact Free & Vendi Optimized)
-"""
-
+# Hello my name is naimur asif borno
 import math
 import torch
 from pathlib import Path
@@ -35,7 +29,7 @@ class UGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
-        noise_scale     : float = 8.0,   # Lowered base scale for SD3 stability
+        noise_scale     : float = 10.0,   # Lowered base scale for SD3 stability
         gamma           : float = 1.2,
     ):
         self.unet           = unet
@@ -156,7 +150,7 @@ class UGILESampler:
         # pose/layout structure with zero grid artifacts.
         if x0.dim() == 4:
             B, C, H, W = xi.shape
-            sigma = 2.0
+            sigma = 2.5
             coords = torch.arange(11, device=x0.device).float() - 5
             gauss_1d = torch.exp(-(coords**2) / (2 * sigma**2))
             gauss_1d = gauss_1d / gauss_1d.sum()
@@ -165,7 +159,7 @@ class UGILESampler:
             xi_low = F.conv2d(xi, kernel, padding=5, groups=C)
             
             # 60% low-freq (pose) + 40% high-freq (natural texture diversity)
-            xi = 0.6 * xi_low + 0.4 * xi
+            xi = 0.65 * xi_low + 0.35 * xi
 
         # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
         xi_flat = xi.flatten()
