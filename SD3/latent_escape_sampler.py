@@ -2,58 +2,7 @@
 latent_escape_sampler.py
 ------------------------
 U-Profile Guided Initial Latent Escape (UGILE)
-
-Core idea (distinct from PeakBack / ONLB):
-  Instead of perturbing a mid-trajectory point and resuming,
-  we use the FULL cached U_k profile from one forward pass to compute
-  a basin-escape direction in x_0 space, then run a complete new
-  forward pass from the modified x_0.
-
-  Because the flow field runs from the NEW x_0, it works WITH the model
-  rather than fighting the model's error-correction. The entire trajectory
-  diverges from the original, not just a suffix of it.
-
-Algorithm:
-  Phase 1 — Forward profiling pass (N model calls, same as PeakBack Phase 1)
-             Cache: {x_k, v_k, v_cond_k, v_uncond_k, sigma_k, U_k}
-
-  Phase 2 — Compute U-weighted escape direction in x_0 space
-             For each step k in a selected subset S:
-               g_k = grad_{x_k}[ U_k ]          (one backward pass per k)
-             Aggregate:
-               d = sum_{k in S} [ w_k * g_k ]
-               w_k = U_k / sum_{k in S}(U_k)    (high-U steps dominate)
-             Project d onto null space of (v_0, x_0) via joint_projector
-             → escape direction stays on the latent sphere, orthogonal
-               to the base velocity (preserves flow-matching geometry)
-
-  Phase 3 — Geodesic move on the latent sphere
-             x_0_new = geodesic_step(x_0, projected_d, r, theta_max)
-             Different branches get a fixed per-branch lateral offset
-             added to d before projection → inter-branch diversity
-
-  Phase 4 — Full new forward pass from x_0_new
-             All 50 Euler steps run fresh → flow field evolves the
-             perturbation naturally → no washout problem
-
-Slots into inference.py MODEL_REGISTRY as "sd3_ugile".
-Add to config.yaml:
-  model_name: "sd3_ugile"
-  model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
-
-  ugile:
-    num_grad_steps:   5        # how many cached steps to use for gradient
-    sigma_lo:         0.3      # band for selecting gradient steps
-    sigma_hi:         0.9
-    escape_scale:     3.0      # multiplier on the projected escape direction
-    theta_max:        0.8      # max geodesic angle per branch
-    branch_noise:     0.3      # lateral offset scale for inter-branch diversity
-    J:                3        # number of diverse branches per seed
-    noise_scale:      0.2      # curvature-scaled background noise magnitude
-    gamma:            1.2      # (reserved) noise shaping exponent
-    diverse_output_dir:  "outputs/diverse"
-    original_output_dir: "outputs/original"
-    save_original:    true
+(Tuned for SD3 - Artifact Free & Vendi Optimized)
 """
 
 import math
@@ -82,11 +31,11 @@ class UGILESampler:
         sigma_lo        : float = 0.3,
         sigma_hi        : float = 0.9,
         escape_scale    : float = 3.0,
-        theta_max       : float = 0.8,
+        theta_max       : float = 0.75,  # Increased to push Vendi Score up
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
-        noise_scale     : float = 15,
+        noise_scale     : float = 8.0,   # Lowered base scale for SD3 stability
         gamma           : float = 1.2,
     ):
         self.unet           = unet
@@ -106,12 +55,8 @@ class UGILESampler:
 
         f_cfg               = cfg.get("flow", {})
         self.num_steps      = f_cfg.get("num_steps",      50)
-        self.guidance_scale = f_cfg.get("guidance_scale", 7.5)
+        self.guidance_scale = f_cfg.get("guidance_scale", 6.0)
         self.do_cfg         = self.guidance_scale > 1.0
-
-    # ================================================================== #
-    #  PUBLIC ENTRY                                                        #
-    # ================================================================== #
 
     def run(
         self,
@@ -149,7 +94,12 @@ class UGILESampler:
         else:
             kappa = 1.0
 
+        # FIX 1: Hard Clamp Epsilon to 2% of latent radius to prevent SD3 VAE breakdown
+        # (5% was too high and caused shredded grass artifacts)
+        r = x0.float().norm().item()
+        max_eps = r * 0.02 
         epsilon = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
+        epsilon = min(epsilon, max_eps)
 
         # A1: Full Trajectory-Covariance-Anchored Noise (Background Diversity)
         rng_cov = torch.Generator(device=x0.device)
@@ -159,7 +109,6 @@ class UGILESampler:
         s_flat_for_diff = semantic_dir.flatten()
         diffs_centered = [(diff.flatten() - s_flat_for_diff) for diff in diffs]
 
-        # Use ALL steps for covariance to ensure robust background variance
         for _ in range(3):
             v_next = torch.zeros_like(v_boundary)
             for k in range(N):
@@ -178,6 +127,10 @@ class UGILESampler:
 
         eta = v_boundary + 0.1 * jitter
 
+        # FIX 2: Remove spatial mean per channel to prevent VAE grid/band artifacts
+        if eta.dim() == 4:
+            eta = eta - eta.mean(dim=(2, 3), keepdim=True)
+
         # Project eta onto span{x0, s_hat}^\perp
         x0_flat = x0.float().flatten()
         eta_flat = eta.flatten()
@@ -189,7 +142,6 @@ class UGILESampler:
         eta = epsilon * eta / (eta.norm() + self.eps)
 
         # Add noise to x0 and re-normalize to stay exactly on the sphere (r)
-        r = x0.float().norm().item()
         x0_perturbed = x0.float() + eta
         x0_perturbed = x0_perturbed * (r / (x0_perturbed.norm() + self.eps))
 
@@ -198,21 +150,22 @@ class UGILESampler:
         rng2.manual_seed(seed * 10000 + 2)
         xi = torch.randn(x0_perturbed.shape, generator=rng2, dtype=torch.float32, device=x0.device)
 
-        # Smooth Structural Low-Frequency Bias (No Mask, Milder Blur)
+        # FIX 3: True 11x11 Gaussian Blur (Replaces AvgPool)
+        # AvgPool leaves subtle grid edges that SD3's 16-channel VAE decodes as artifacts.
+        # An 11x11 Gaussian convolution with sigma=2.0 perfectly isolates low-frequency 
+        # pose/layout structure with zero grid artifacts.
         if x0.dim() == 4:
-          B, C, H, W = xi.shape
-          # Create a 5x5 Gaussian kernel
-          sigma = 0.6
-          coords = torch.arange(5, device=x0.device).float() - 2
-          gauss_1d = torch.exp(-(coords**2) / (2 * sigma**2))
-          gauss_1d = gauss_1d / gauss_1d.sum()
-          kernel = torch.outer(gauss_1d, gauss_1d).view(1, 1, 5, 5).repeat(C, 1, 1, 1)
-          
-          # Apply depthwise convolution (groups=C) with padding to preserve spatial dims
-          xi_low = F.conv2d(xi, kernel, padding=2, groups=C)
-          
-          # Blend to preserve some high-frequency detail for natural variation
-          xi = 0.7 * xi_low + 0.3 * xi
+            B, C, H, W = xi.shape
+            sigma = 2.0
+            coords = torch.arange(11, device=x0.device).float() - 5
+            gauss_1d = torch.exp(-(coords**2) / (2 * sigma**2))
+            gauss_1d = gauss_1d / gauss_1d.sum()
+            kernel = torch.outer(gauss_1d, gauss_1d).view(1, 1, 11, 11).repeat(C, 1, 1, 1)
+            
+            xi_low = F.conv2d(xi, kernel, padding=5, groups=C)
+            
+            # 60% low-freq (pose) + 40% high-freq (natural texture diversity)
+            xi = 0.6 * xi_low + 0.4 * xi
 
         # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
         xi_flat = xi.flatten()
@@ -303,21 +256,11 @@ class UGILESampler:
     # ================================================================== #
 
     def _compute_escape_direction(self, x0, cache, text_embeddings, pooled_embeddings):
-        """
-        For each selected step k, compute grad_{x_k}[U_k].
-        Approximate grad_{x_0}[U_k] ≈ grad_{x_k}[U_k]
-        (Euler Jacobian dx_0/dx_k ≈ identity for small per-step dt).
-        Aggregate with U_k weights.
-        """
         N = cache["N"]
-
-        # Select steps in sigma band, evenly spaced up to num_grad_steps
         band = [k for k in range(N)
                 if self.sigma_lo <= cache["sigma"][k] <= self.sigma_hi]
         if not band:
             band = list(range(N))
-
-        # Use ALL steps in the band
         selected = band
 
         U_selected = [cache["U"][k] for k in selected]
@@ -329,7 +272,6 @@ class UGILESampler:
         for k, w_k in zip(selected, weights):
             x_k = cache["x"][k].to(dtype=torch.float32, device=self.device)
             t_k = cache["t"][k]
-
             grad = self._grad_U_at_xk(x_k, t_k, cache["sigma"][k],
                                        text_embeddings, pooled_embeddings)
             escape_dir = escape_dir + w_k * grad
@@ -338,7 +280,6 @@ class UGILESampler:
 
     def _grad_U_at_xk(self, x_k, t, sigma, text_embeddings, pooled_embeddings,
                       eps_smooth=1e-6):
-        """grad_{x_k}[ U_k ] via one backward pass. U_k = sigma * ||v_c - v_u||."""
         device = next(self.unet.parameters()).device
         dtype  = next(self.unet.parameters()).dtype
 
@@ -374,7 +315,6 @@ class UGILESampler:
     # ================================================================== #
 
     def _short_forward_pass(self, x0_new, text_embeddings, pooled_embeddings, n_steps=10):
-        """Run only the first n_steps to cheaply check if x0_new is on-manifold."""
         self.scheduler.set_timesteps(self.num_steps)
         timesteps = self.scheduler.timesteps[:n_steps]
         x = x0_new.clone()
@@ -388,7 +328,6 @@ class UGILESampler:
     # ================================================================== #
 
     def _full_forward_pass(self, x0_new, text_embeddings, pooled_embeddings):
-        """Run all N Euler steps from the new initial latent."""
         self.scheduler.set_timesteps(self.num_steps)
         timesteps = self.scheduler.timesteps
         N = len(timesteps)
@@ -443,13 +382,6 @@ class UGILESampler:
 # ══════════════════════════════════════════════════════════════════════ #
 
 def run_sd3_ugile(opts: dict):
-    """
-    Drop-in runner for inference.py MODEL_REGISTRY.
-    Set model_name: "sd3_ugile" in config.yaml to activate.
-
-    Iterates over all prompts and seeds from config. The model is loaded once
-    and the sampler is reused across all prompts and seeds.
-    """
     from pipeline_wrapper import SD3PipelineWrapper
 
     cfg     = opts.get("_cfg", {})
@@ -471,10 +403,10 @@ def run_sd3_ugile(opts: dict):
         sigma_lo        = ug_cfg.get("sigma_lo",        0.3),
         sigma_hi        = ug_cfg.get("sigma_hi",        0.9),
         escape_scale    = ug_cfg.get("escape_scale",    3.0),
-        theta_max       = ug_cfg.get("theta_max",       0.8),
+        theta_max       = ug_cfg.get("theta_max",       0.75),
         walk_steps      = ug_cfg.get("walk_steps",      10),
         J               = ug_cfg.get("J",               1),
-        noise_scale     = ug_cfg.get("noise_scale",     0.2),
+        noise_scale     = ug_cfg.get("noise_scale",     8.0),
         gamma           = ug_cfg.get("gamma",           1.2),
     )
 

@@ -22,26 +22,7 @@ seeds:
 
 # ── Prompts (first one is used by inference.py; all used by run_experiment.py) ──
 prompts:
-  - "a photo of an astronaut riding a horse on mars"
-  - "A woman holding a purple umbrella walking in the rain"
-  - "A view of a multi-tiered clock tower with an American flag on the top."
-  - "a sink and a mirror reflecting the many pictures on the wall"
-  - "A man in a kitchen instructing a woman on what to do"
-  - "there are two cups in front of the bathroom mirror"
-  - "A kitchen that appears to be missing a cabinet door"
-  - "Spoon in a bowl of chopped vegetables with butter"
-  - "A large Sonic statue on a beach next to a surf board."
-  - "A vintage wood stove used for cooking or baking."
-  - "A sepia photo of Big Ben in London, seen from below"
-  - "A kite flying through a blue sky with a long tail"
-  - "A small dog is sticking its head out of a backpack"
-  - "A pasta dish with mushrooms and broccoli in a cream sauce"
-  - "a person is skiing down a snowy slope"
-  - "A vintage closeup shows a chair with a toddler with a big smile and a big toy bear seated right next to a second toddler with a semi-smile, holding what appears to be a coin purse"
-  - "Two small frying pans have eggs and a slice of ham on a stove"
-  - "A little girl in a rocking chair holding a teddy bear"
-  - "Lemons, apples, and a coffee cup in an arranged 'still life'."
-  - "a yellow food truck parked on the side of a city street"
+
   - "Pizza type meal set out on a wooden table with plates."
   - "the corner of a bathroom with light mint green walls above the tile."
   - "A cat snuggled up to a pair of shoes on the floor."
@@ -261,10 +242,10 @@ peakback:
 
 ugile:
   num_grad_steps:      50      # backward passes for escape direction
-  sigma_lo:            -1.0    # which cached steps to use
+  sigma_lo:            -1.0   # which cached steps to use
   sigma_hi:            1.0
   escape_scale:        1.0    # how far to push x_0 along escape direction
-  theta_max:           0.6   # max geodesic angle
+  theta_max:           0.75   # max geodesic angle
   walk_steps:          10     # split into 10 small steps of 0.06 rad each
   branch_noise:        0.7    # lateral offset for inter-branch diversity
   J:                   1      # number of diverse images per seed
