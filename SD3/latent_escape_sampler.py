@@ -430,7 +430,13 @@ def run_sd3_ugile(opts: dict):
     total = len(prompts) * len(seeds)
     done  = 0
 
+    # ADD THIS LINE: Read the offset injected by the parallel runner
+    prompt_offset = cfg.get("prompt_offset", 0)
+
     for p_idx, prompt in enumerate(prompts):
+        # Calculate the absolute global index for filename safety
+        global_idx = p_idx + prompt_offset
+
         prompt_embeds, pooled_embeds = wrapper.encode_prompt(
             prompt, opts["negative_prompt"]
         )
@@ -443,15 +449,17 @@ def run_sd3_ugile(opts: dict):
             result  = sampler.run(latents, prompt_embeds, pooled_embeds, seed=seed)
 
             if save_original:
-                base_path = _base_path(p_idx, seed)
+                # CHANGE THIS: Use global_idx instead of p_idx
+                base_path = _base_path(global_idx, seed)
                 wrapper.decode_latents(result["original_latents"]).save(base_path)
 
             for br in result["branches"]:
-                out_path = _branch_path(p_idx, seed, br["branch_idx"])
+                # CHANGE THIS: Use global_idx instead of p_idx
+                out_path = _branch_path(global_idx, seed, br["branch_idx"])
                 wrapper.decode_latents(br["latents"]).save(out_path)
 
                 records.append({
-                    "prompt_idx": p_idx,
+                    "prompt_idx": global_idx, # Use global_idx here too
                     "prompt"    : prompt,
                     "seed"      : seed,
                     "branch"    : br["branch_idx"],
