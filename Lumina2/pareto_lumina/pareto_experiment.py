@@ -56,9 +56,8 @@ def clip_score(images, prompts, model, proc, device):
 @torch.no_grad()
 def _clip_embeddings(images, model, proc, device):
     inputs = proc(images=images, return_tensors="pt").to(device)
-    emb = model.get_image_features(**inputs, return_dict=False)
-    if isinstance(emb, (tuple, list)):
-        emb = emb[0]
+    out = model.get_image_features(**inputs)
+    emb = out.image_embeds if hasattr(out, "image_embeds") else out
     return (emb / emb.norm(dim=-1, keepdim=True)).cpu().numpy()
 
 
