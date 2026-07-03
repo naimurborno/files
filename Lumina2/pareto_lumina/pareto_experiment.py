@@ -56,8 +56,14 @@ def clip_score(images, prompts, model, proc, device):
 @torch.no_grad()
 def _clip_embeddings(images, model, proc, device):
     inputs = proc(images=images, return_tensors="pt").to(device)
-    out = model.get_image_features(**inputs)
-    emb = out.image_embeds if hasattr(out, "image_embeds") else out
+    try:
+        out = model.get_image_features(**inputs)
+        emb = out if torch.is_tensor(out) else getattr(out, "image_embeds", None)
+        if emb is None:
+            raise AttributeError
+    except AttributeError:
+        vision_out = model.vision_model(**inputs)
+        emb = model.visual_projection(vision_out.pooler_output)
     return (emb / emb.norm(dim=-1, keepdim=True)).cpu().numpy()
 
 
