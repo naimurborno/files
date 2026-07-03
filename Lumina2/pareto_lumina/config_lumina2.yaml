@@ -1,0 +1,86 @@
+# config_lumina2.yaml — Lumina-Image-2.0 + UGILE diverse sampler
+#
+# Mirrors config_sana.yaml's structure exactly (same keys, same schema) so
+# pipeline_wrapper_lumina2.py / latent_escape_sampler_lumina2.py can be read
+# with the exact same cfg.get(...) calls. Only the *values* differ, tuned
+# for Lumina2's architecture and its model-card recommended settings.
+
+# ── Active model ────────────────────────────────────────────────────
+model_name: "lumina2_ugile"
+model_id:   "Alpha-VLLM/Lumina-Image-2.0"
+
+# ── Device & seed ────────────────────────────────────────────────────
+device: "cuda"   # cuda | cpu | mps
+seed:   41
+
+# ── Multi-seed generation ────────────────────────────────────────────
+seeds:
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+
+# ── Prompts ───────────────────────────────────────────────────────────
+prompts:
+  - "a photo of an astronaut riding a horse on mars"
+
+negative_prompt: ""   # Lumina2's model card uses "" as the negative prompt
+
+# ── Output path ──────────────────────────────────────────────────────
+output: "prompt_lumina2.png"
+diverse_output_dir:  "outputs/diverse"
+original_output_dir: "outputs/original"
+
+# ── Image generation ─────────────────────────────────────────────────
+generation:
+  height: 512
+  width:  512
+
+# ── Flow / Scheduler ──────────────────────────────────────────────────
+# num_steps / guidance_scale / cfg_trunc_ratio / cfg_normalization follow
+# the values used in the user-provided Lumina2 notebook snippet.
+flow:
+  num_steps:         50
+  guidance_scale:    4
+  solver:            "euler"
+  t_start:           1.0
+  t_end:             0.0
+  cfg_trunc_ratio:   0.25
+  cfg_normalization: true
+
+model_kwargs: {}
+
+# ── VAE overrides (null = use checkpoint's own vae.config values) ────
+vae:
+  scale_factor:   8      # spatial downsample factor (patchify H/W divisor)
+  scaling_factor: null   # latent scaling_factor override
+  shift_factor:   null   # latent shift_factor override
+
+# ── Pareto-frontier hyperparameter sweep (pareto_experiment.py) ──────
+pareto:
+  num_prompts:      7                  # how many of `prompts` (below) to use per combo
+  seeds:            [41, 42]           # 2 seeds → 7 x 2 = 14 images/combo, 1008 total
+  real_images_dir:  "data/real_images" # reference set for FID
+  output_dir:        "pareto_results"
+  grid:
+    theta_max:           [0.75, 0.8, 0.9, 1.0, 1.1, 1.2]
+    noise_scale:         [0.2, 0.5, 0.7, 0.9]
+    interp_scale_factor: [0.5, 0.7, 0.8]
+
+# ── U-Profile Guided Initial Latent Escape (UGILE) ───────────────────
+# Same fields, same meaning as config_sana.yaml's `ugile:` block.
+ugile:
+  num_grad_steps:      50
+  sigma_lo:            -1.0
+  sigma_hi:            1.0
+  escape_scale:        1.0
+  theta_max:           1.2
+  walk_steps:          10
+  branch_noise:        0.7
+  J:                   1
+  noise_scale:         0.15
+  gamma:               1.6
+  diverse_output_dir:  "outputs/diverse"
+  original_output_dir: "outputs/original"
+  save_original:       true

@@ -103,6 +103,7 @@ class Lumina2UGILESampler:
         gamma           : float = 1.2,
         cfg_trunc_ratio   : float = 1.0,
         cfg_normalization : bool  = False,
+        interp_scale_factor : float = 0.96,
     ):
         self.transformer     = transformer
         self.scheduler        = scheduler
@@ -130,6 +131,7 @@ class Lumina2UGILESampler:
         # v_cond/v_uncond profiling pair.
         self.cfg_trunc_ratio   = cfg_trunc_ratio
         self.cfg_normalization = cfg_normalization
+        self.interp_scale_factor = interp_scale_factor
 
         # No SANA-style timestep_scale here — Lumina2 has no such field.
         # Reversed-timestep + sign-flip are applied directly in
@@ -232,7 +234,7 @@ class Lumina2UGILESampler:
             B, C, H, W = xi.shape
             # Downsample to 60% and back up. This smoothly filters out high-frequency texture
             # noise without creating the pixel-block artifacts a coarser downsample would cause.
-            xi_low = F.interpolate(xi, scale_factor=0.50, mode='bilinear', recompute_scale_factor=False, align_corners=False)
+            xi_low = F.interpolate(xi, scale_factor=self.interp_scale_factor, mode='bilinear', recompute_scale_factor=False, align_corners=False)
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
 
             # Blend to preserve some high-frequency detail for natural variation
@@ -560,6 +562,7 @@ def run_lumina2_ugile(opts: dict):
         gamma           = ug_cfg.get("gamma",           1.2),
         cfg_trunc_ratio   = cfg.get("flow", {}).get("cfg_trunc_ratio",   1.0),
         cfg_normalization = cfg.get("flow", {}).get("cfg_normalization", False),
+        interp_scale_factor = ug_cfg.get("interp_scale_factor", 0.96),
     )
 
     base_out        = Path(opts["output"])
