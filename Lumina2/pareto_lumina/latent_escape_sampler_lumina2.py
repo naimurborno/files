@@ -317,8 +317,8 @@ class Lumina2UGILESampler:
             x = self.scheduler.step(v, t, x).prev_sample
             cached_x[k + 1] = x.detach().float().clone()
 
-            if False:  # step-level logging suppressed
-                pass
+            if (k + 1) % 10 == 0 or k == N - 1:
+                print(f"[UGILE]     profiling step {k+1}/{N}", flush=True)
 
         return {
             "x": cached_x, "v": cached_v,
@@ -417,9 +417,12 @@ class Lumina2UGILESampler:
         timesteps = self.scheduler.timesteps
         x = x0_new.clone()
 
-        for t in timesteps:
+        N = len(timesteps)
+        for k, t in enumerate(timesteps):
             v = self._velocity_forward(x, t, text_embeddings, attention_mask)
             x = self.scheduler.step(v, t, x).prev_sample
+            if (k + 1) % 10 == 0 or k == N - 1:
+                print(f"[UGILE]     escape step {k+1}/{N}", flush=True)
 
         return x
 

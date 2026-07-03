@@ -138,6 +138,8 @@ def run_combo(wrapper, cfg, combo, prompts, seeds):
             latents = wrapper.get_initial_latents(seed=seed)
             result  = sampler.run(latents, prompt_embeds, attention_mask, seed=seed)
             images.append(wrapper.decode_latents(result["branches"][0]["latents"]))
+            print(f"[Pareto]   img {len(images)}/{len(prompts)*len(seeds)} "
+                  f"(prompt='{prompt[:30]}...', seed={seed})", flush=True)
     return images
 
 
