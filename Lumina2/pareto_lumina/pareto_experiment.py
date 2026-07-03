@@ -18,6 +18,7 @@ Requires: pip install torchmetrics vendi-score transformers matplotlib pandas
 """
 
 import argparse
+import gc
 import itertools
 from pathlib import Path
 
@@ -94,7 +95,11 @@ def fid_score(gen_images, real_dir, device):
 
     fid.update(_batch(real_imgs), real=True)
     fid.update(_batch(gen_images), real=False)
-    return float(fid.compute().item())
+    score = float(fid.compute().item())
+    del fid
+    gc.collect()
+    torch.cuda.empty_cache()
+    return score
 
 
 # ══════════════════════════════════════════════════════════════════════ #
@@ -283,6 +288,10 @@ def main():
         combo_dir.mkdir(exist_ok=True)
         for j, im in enumerate(images):
             im.save(combo_dir / f"img_{j}.png")
+
+        del images
+        gc.collect()
+        torch.cuda.empty_cache()
 
     df = pd.DataFrame(rows)
     shard_csv = out_dir / f"results_shard{args.shard_id}.csv"
