@@ -24,7 +24,12 @@ seeds:
 # ── Prompts ───────────────────────────────────────────────────────────
 prompts:
   - "a photo of an astronaut riding a horse on mars"
-
+  - "A woman holding a purple umbrella walking in the rain"
+  - "A kite flying through a blue sky with a long tail"
+  - "A vintage closeup shows a chair with a toddler with a big smile and a big toy bear seated right next to a second toddler with a semi-smile, holding what appears to be a coin purse"
+  - "A cat snuggled up to a pair of shoes on the floor."
+  - "A keyboard and mouse in front of a computer."
+  - "A bathroom with walk-in shower, deep tub and sink overlooks other townhouses"
 negative_prompt: ""   # Lumina2's model card uses "" as the negative prompt
 
 # ── Output path ──────────────────────────────────────────────────────
