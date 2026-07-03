@@ -73,6 +73,7 @@ import math
 import torch
 from pathlib import Path
 from typing import Dict, Any, Optional
+import torch.nn.functional as F
 
 from peakback_core import (
     tweedie_potential,
@@ -151,37 +152,103 @@ class Lumina2UGILESampler:
 
         # Phase 1 — forward profiling pass
         cache = self._forward_pass_with_profiling(x0, text_embeddings, attention_mask)
-        rng = torch.Generator(device=x0.device)
-        rng.manual_seed(seed * 10000 + 1)   # deterministic per seed
-        noise = torch.randn(x0.shape, generator=rng,
-                            dtype=x0.dtype, device=x0.device)
-        x0 = x0 +  self.noise_scale * noise
-        # Optional: re-normalise so the latent stays on the same energy shell
-        # x0 = x0_input * (x0.norm() / (x0_input.norm() + self.eps))
 
-        # Phase 2 — semantic direction from cached velocity field
+        # --- Phase 2 — semantic direction & trajectory analysis ---
         N = cache["N"]
-        semantic_dir = torch.zeros_like(x0, dtype=torch.float32)
-        U_total = sum(cache["U"]) + self.eps
-        for k in range(N):
-            w_k = cache["U"][k] / U_total
-            diff = (cache["v_cond"][k] - cache["v_uncond"][k]).to(semantic_dir.device)
-            semantic_dir += w_k * diff.float()
-        semantic_unit = semantic_dir / (semantic_dir.norm() + self.eps)
+        U_vals = torch.tensor(cache["U"], device=x0.device, dtype=torch.float32)
+        U_total = U_vals.sum() + self.eps
+        w = U_vals / U_total
 
-        # Phase 3 — build x_0_new orthogonal to the semantic direction
-        r = x0.float().norm().item()
+        semantic_dir = torch.zeros_like(x0, dtype=torch.float32)
+        diffs = []
+        for k in range(N):
+            diff = (cache["v_cond"][k] - cache["v_uncond"][k]).to(x0.device).float()
+            diffs.append(diff)
+            semantic_dir += w[k] * diff
+
+        semantic_unit = semantic_dir / (semantic_dir.norm() + self.eps)
+        s_flat = semantic_unit.flatten()
+
+        # --- High-Level Advanced Noise Injection (Before Geodesic Step) ---
+
+        # A3: U-Profile Curvature (2nd Derivative) as Noise Scale
+        if N > 2:
+            d2U = U_vals[:-2] - 2 * U_vals[1:-1] + U_vals[2:]
+            kappa = d2U.abs().mean().item()
+        else:
+            kappa = 1.0
+
+        epsilon = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
+
+        # A1: Full Trajectory-Covariance-Anchored Noise (Background Diversity)
+        rng_cov = torch.Generator(device=x0.device)
+        rng_cov.manual_seed(seed * 10000 + 0)
+        v_boundary = torch.randn(x0.shape, generator=rng_cov, dtype=torch.float32, device=x0.device).flatten()
+
+        s_flat_for_diff = semantic_dir.flatten()
+        diffs_centered = [(diff.flatten() - s_flat_for_diff) for diff in diffs]
+
+        # Use ALL steps for covariance to ensure robust background variance
+        for _ in range(3):
+            v_next = torch.zeros_like(v_boundary)
+            for k in range(N):
+                dot_product = torch.dot(diffs_centered[k], v_boundary)
+                v_next += w[k] * diffs_centered[k] * dot_product
+
+            v_boundary = v_next
+            v_boundary = v_boundary - torch.dot(v_boundary, s_flat) * s_flat
+            v_boundary = v_boundary / (v_boundary.norm() + self.eps)
+
+        v_boundary = v_boundary.view_as(x0)
+
         rng = torch.Generator(device=x0.device)
         rng.manual_seed(seed * 10000 + 1)
-        noise = torch.randn(x0.shape, generator=rng,
-                            dtype=torch.float32, device=x0.device)
-        noise = noise - (noise.reshape(-1) @ semantic_unit.reshape(-1)) * semantic_unit
-        noise = noise / (noise.norm() + self.eps)
+        jitter = torch.randn(x0.shape, generator=rng, dtype=torch.float32, device=x0.device)
+
+        eta = v_boundary + 0.1 * jitter
+
+        # Project eta onto span{x0, s_hat}^\perp
+        x0_flat = x0.float().flatten()
+        eta_flat = eta.flatten()
+        eta_flat = eta_flat - torch.dot(eta_flat, x0_flat) / (torch.dot(x0_flat, x0_flat) + self.eps) * x0_flat
+        eta_flat = eta_flat - torch.dot(eta_flat, s_flat) * s_flat
+        eta = eta_flat.view_as(x0)
+
+        # Normalize and scale noise
+        eta = epsilon * eta / (eta.norm() + self.eps)
+
+        # Add noise to x0 and re-normalize to stay exactly on the sphere (r)
+        r = x0.float().norm().item()
+        x0_perturbed = x0.float() + eta
+        x0_perturbed = x0_perturbed * (r / (x0_perturbed.norm() + self.eps))
+
+        # --- Phase 3 — Geodesic Escape Step from perturbed x0 ---
+        rng2 = torch.Generator(device=x0.device)
+        rng2.manual_seed(seed * 10000 + 2)
+        xi = torch.randn(x0_perturbed.shape, generator=rng2, dtype=torch.float32, device=x0.device)
+
+        # Smooth Structural Low-Frequency Bias (No Mask, Milder Blur)
+        if x0.dim() == 4:
+            B, C, H, W = xi.shape
+            # Downsample to 60% and back up. This smoothly filters out high-frequency texture
+            # noise without creating the pixel-block artifacts a coarser downsample would cause.
+            xi_low = F.interpolate(xi, scale_factor=0.96, mode='bilinear', recompute_scale_factor=False, align_corners=False)
+            xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
+
+            # Blend to preserve some high-frequency detail for natural variation
+            xi = 0.7 * xi_low + 0.3 * xi
+
+        # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
+        xi_flat = xi.flatten()
+        xi_flat = xi_flat - torch.dot(xi_flat, s_flat) * s_flat
+        x0p_flat = x0_perturbed.flatten()
+        xi_flat = xi_flat - torch.dot(xi_flat, x0p_flat) / (torch.dot(x0p_flat, x0p_flat) + self.eps) * x0p_flat
+
+        e_hat = xi_flat.view_as(x0_perturbed)
+        e_hat = e_hat / (e_hat.norm() + self.eps)
 
         theta = self.theta_max
-        # alpha = self.gamma * math.cos(theta)
-
-        x0_new = ( math.cos(theta) * x0.float() + math.sin(theta) * r * noise)
+        x0_new = math.cos(theta) * x0_perturbed + math.sin(theta) * r * e_hat
         x0_new = x0_new.to(x0.dtype)
 
         cos_x0 = torch.nn.functional.cosine_similarity(
