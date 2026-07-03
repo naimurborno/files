@@ -66,7 +66,7 @@ vae:
 pareto:
   num_prompts:      7                  # how many of `prompts` (below) to use per combo
   seeds:            [41, 42]           # 2 seeds → 7 x 2 = 14 images/combo, 1008 total
-  real_images_dir:  "data/real_images" # reference set for FID
+  real_images_dir:  "/kaggle/working/my_extracted_images" # reference set for FID
   output_dir:        "pareto_results"
   grid:
     theta_max:           [0.75, 0.8, 0.9, 1.0, 1.1, 1.2]
