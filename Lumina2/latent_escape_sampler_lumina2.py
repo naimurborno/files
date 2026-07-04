@@ -232,7 +232,7 @@ class Lumina2UGILESampler:
             B, C, H, W = xi.shape
             # Downsample to 60% and back up. This smoothly filters out high-frequency texture
             # noise without creating the pixel-block artifacts a coarser downsample would cause.
-            xi_low = F.interpolate(xi, scale_factor=0.50, mode='bilinear', recompute_scale_factor=False, align_corners=False)
+            xi_low = F.interpolate(xi, scale_factor=0.8, mode='bilinear', recompute_scale_factor=False, align_corners=False)
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
 
             # Blend to preserve some high-frequency detail for natural variation
@@ -582,8 +582,14 @@ def run_lumina2_ugile(opts: dict):
     total = len(prompts) * len(seeds)
     done  = 0
 
+    # 1. ADD THIS LINE: Read the offset injected by the parallel runner config
+    prompt_offset = cfg.get("prompt_offset", 0)
+
     for p_idx, prompt in enumerate(prompts):
-        print(f"\n[UGILE-Lumina2] Prompt {p_idx + 1}/{len(prompts)}: \"{prompt}\"")
+        # 2. ADD THIS LINE: Calculate the true absolute index for filename safety
+        global_idx = p_idx + prompt_offset
+
+        print(f"\n[UGILE-Lumina2] Prompt {global_idx + 1}/{len(prompts) + prompt_offset}: \"{prompt}\"")
         prompt_embeds, attention_mask = wrapper.encode_prompt(
             prompt, opts["negative_prompt"]
         )
@@ -596,17 +602,19 @@ def run_lumina2_ugile(opts: dict):
             result  = sampler.run(latents, prompt_embeds, attention_mask, seed=seed)
 
             if save_original:
-                base_path = _base_path(p_idx, seed)
+                # 3. CHANGE THIS: Use global_idx instead of p_idx
+                base_path = _base_path(global_idx, seed)
                 wrapper.decode_latents(result["original_latents"]).save(base_path)
                 print(f"[UGILE-Lumina2]   Base  → {base_path}")
 
             for br in result["branches"]:
-                out_path = _branch_path(p_idx, seed, br["branch_idx"])
+                # 4. CHANGE THIS: Use global_idx instead of p_idx
+                out_path = _branch_path(global_idx, seed, br["branch_idx"])
                 wrapper.decode_latents(br["latents"]).save(out_path)
                 print(f"[UGILE-Lumina2]   Branch {br['branch_idx']} → {out_path}")
 
                 records.append({
-                    "prompt_idx": p_idx,
+                    "prompt_idx": global_idx, # 5. CHANGE THIS: Use global_idx
                     "prompt"    : prompt,
                     "seed"      : seed,
                     "branch"    : br["branch_idx"],
