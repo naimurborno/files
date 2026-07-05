@@ -237,12 +237,12 @@ class Lumina2UGILESampler:
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
 
             # Blend to preserve most high-frequency detail
-            xi = 0.7 * xi + 0.3 * xi_low
+            xi = 0.9 * xi + 0.1 * xi_low
 
         # Joint orthogonal projection (Eq. 10) instead of sequential Gram-Schmidt
         xi_flat = xi.flatten()
         x0p_flat = x0_perturbed.flatten()
-        w = joint_projector(xi_flat, s_flat, x0p_flat)
+        w = joint_projector(xi_flat, s_flat, x0p_flat, ridge=1e-3)
 
         x0_new_flat, theta_t = geodesic_step(x0p_flat, w, r, theta_max=self.theta_max)
         theta = theta_t.item()

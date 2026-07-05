@@ -41,7 +41,7 @@ def joint_projector(F: torch.Tensor, v: torch.Tensor, x: torch.Tensor, ridge: fl
     G = A @ A.t()                                        # [2, 2] Gram matrix
     G = G + ridge * torch.eye(2, dtype=G.dtype, device=G.device)
     rhs = (A @ F.unsqueeze(-1))                           # [2, 1]
-    y = torch.linalg.solve(G, rhs)                         # G^{-1} A F
+    y = torch.linalg.lstsq(G, rhs).solution
     w = F - (A.t() @ y).squeeze(-1)                        # Eq. 10
     return w
 
