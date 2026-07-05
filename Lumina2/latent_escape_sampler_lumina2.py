@@ -99,7 +99,7 @@ class Lumina2UGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
-        noise_scale     : float = 0.5,
+        noise_scale     : float = 1.5,
         gamma           : float = 1.2,
         cfg_trunc_ratio   : float = 1.0,
         cfg_normalization : bool  = False,
@@ -179,6 +179,7 @@ class Lumina2UGILESampler:
             kappa = 1.0
 
         epsilon = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
+        epsilon = min(epsilon, 10.0)  # guard against kappa≈0 blowup -> fp16 overflow -> NaN
 
         # A1: Full Trajectory-Covariance-Anchored Noise (Background Diversity)
         rng_cov = torch.Generator(device=x0.device)
@@ -232,7 +233,7 @@ class Lumina2UGILESampler:
             B, C, H, W = xi.shape
             # Downsample to 60% and back up. This smoothly filters out high-frequency texture
             # noise without creating the pixel-block artifacts a coarser downsample would cause.
-            xi_low = F.interpolate(xi, scale_factor=0.55, mode='bilinear', recompute_scale_factor=False, align_corners=False)
+            xi_low = F.interpolate(xi, scale_factor=0.5, mode='bilinear', recompute_scale_factor=False, align_corners=False)
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
 
             # Blend to preserve some high-frequency detail for natural variation

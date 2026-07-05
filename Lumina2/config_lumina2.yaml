@@ -255,14 +255,14 @@ model_kwargs: {}
 # Same fields, same meaning as config_sana.yaml's `ugile:` block.
 ugile:
   num_grad_steps:      50
-  sigma_lo:            -1.0
+  sigma_lo:            0.0
   sigma_hi:            1.0
   escape_scale:        1.0
   theta_max:           0.30
   walk_steps:          10
   branch_noise:        0.7
   J:                   1
-  noise_scale:         0.7
+  noise_scale:         1.5
   gamma:               1.6
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
