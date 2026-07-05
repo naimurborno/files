@@ -237,7 +237,7 @@ class Lumina2UGILESampler:
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
 
             # Blend to preserve some high-frequency detail for natural variation
-            xi = 0.7 * xi_low + 0.3 * xi
+            xi = 0.8 * xi_low + 0.2 * xi
 
         # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
         xi_flat = xi.flatten()
