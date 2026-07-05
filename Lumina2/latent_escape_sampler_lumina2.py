@@ -99,7 +99,7 @@ class Lumina2UGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
-        noise_scale     : float = 1.5,
+        noise_scale     : float = 0.5,
         gamma           : float = 1.2,
         cfg_trunc_ratio   : float = 1.0,
         cfg_normalization : bool  = False,
@@ -233,23 +233,20 @@ class Lumina2UGILESampler:
             B, C, H, W = xi.shape
             # Downsample to 60% and back up. This smoothly filters out high-frequency texture
             # noise without creating the pixel-block artifacts a coarser downsample would cause.
-            xi_low = F.interpolate(xi, scale_factor=0.5, mode='bilinear', recompute_scale_factor=False, align_corners=False)
+            xi_low = F.interpolate(xi, scale_factor=0.55, mode='bilinear', recompute_scale_factor=False, align_corners=False)
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
 
-            # Blend to preserve some high-frequency detail for natural variation
-            xi = 0.7 * xi_low + 0.3 * xi
+            # Blend to preserve most high-frequency detail
+            xi = 0.7 * xi + 0.3 * xi_low
 
-        # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
+        # Joint orthogonal projection (Eq. 10) instead of sequential Gram-Schmidt
         xi_flat = xi.flatten()
-        xi_flat = xi_flat - torch.dot(xi_flat, s_flat) * s_flat
         x0p_flat = x0_perturbed.flatten()
-        xi_flat = xi_flat - torch.dot(xi_flat, x0p_flat) / (torch.dot(x0p_flat, x0p_flat) + self.eps) * x0p_flat
+        w = joint_projector(xi_flat, s_flat, x0p_flat)
 
-        e_hat = xi_flat.view_as(x0_perturbed)
-        e_hat = e_hat / (e_hat.norm() + self.eps)
-
-        theta = self.theta_max
-        x0_new = math.cos(theta) * x0_perturbed + math.sin(theta) * r * e_hat
+        x0_new_flat, theta_t = geodesic_step(x0p_flat, w, r, theta_max=self.theta_max)
+        theta = theta_t.item()
+        x0_new = x0_new_flat.view_as(x0_perturbed)
         x0_new = x0_new.to(x0.dtype)
 
         cos_x0 = torch.nn.functional.cosine_similarity(
