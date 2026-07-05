@@ -43,6 +43,7 @@ def joint_projector(F: torch.Tensor, v: torch.Tensor, x: torch.Tensor, ridge: fl
     rhs = (A @ F.unsqueeze(-1))                           # [2, 1]
     y = torch.linalg.lstsq(G, rhs).solution
     w = F - (A.t() @ y).squeeze(-1)                        # Eq. 10
+    w = torch.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
     return w
 
 
