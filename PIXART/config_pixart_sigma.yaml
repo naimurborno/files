@@ -1,5 +1,5 @@
 model_name: "pixart_sigma_ugile"
-model_id:   "PixArt-alpha/PixArt-Sigma-XL-2-512-MS"
+model_id:   "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"
 
 device: "cuda"
 seed:   41
@@ -217,8 +217,8 @@ generation:
   width:  512
 
 flow:
-  num_steps:      30
-  guidance_scale: 4.5
+  num_steps:      50
+  guidance_scale: 4
 
 ugile:
   sigma_lo:     0.3
