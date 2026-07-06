@@ -1,5 +1,5 @@
 model_name: "pixart_sigma_ugile"
-model_id:   "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS"
+model_id:   "futurefrompast/pixart-alpha-512"
 
 device: "cuda"
 seed:   41
@@ -213,8 +213,8 @@ negative_prompt: ""
 output: "prompt_pixart.png"
 
 generation:
-  height: 1024
-  width:  1024
+  height: 512
+  width:  512
 
 flow:
   num_steps:      50
