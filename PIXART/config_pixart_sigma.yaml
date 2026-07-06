@@ -221,9 +221,9 @@ flow:
   guidance_scale: 4
 
 ugile:
-  sigma_lo:     0.3
-  sigma_hi:     0.9
-  theta_max:    0.5
+  sigma_lo:     -1.0
+  sigma_hi:     1.0
+  theta_max:    0.9
   noise_scale:  1.5
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
