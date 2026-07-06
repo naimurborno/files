@@ -249,6 +249,8 @@ class Lumina2UGILESampler:
         x0_new = x0_new_flat.view_as(x0_perturbed)
         x0_new = x0_new.to(x0.dtype)
 
+        x0_new = torch.clamp(x0_new, -1e4, 1e4)
+
         cos_x0 = torch.nn.functional.cosine_similarity(
             x0_new.reshape(1, -1).float(), x0.float().reshape(1, -1)
         ).item()

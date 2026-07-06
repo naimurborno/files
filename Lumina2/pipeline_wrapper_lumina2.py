@@ -103,6 +103,7 @@ class Lumina2PipelineWrapper:
         self.text_encoder = self.pipe.text_encoder
         self.transformer  = self.pipe.transformer
         self.vae          = self.pipe.vae
+        self.vae.to(torch.float32)   # matches SD3/SANA fp32 decode
 
         # Lumina2Pipeline hardcodes this to 8 in __init__ (AutoencoderKL,
         # not DC-AE) — reuse the pipe's own attribute rather than
