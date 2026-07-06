@@ -217,6 +217,9 @@ class PixArtSigmaUGILESampler:
         dtype  = next(self.transformer.parameters()).dtype
 
         latent_input = (torch.cat([x, x]) if self.do_cfg else x).to(device=device, dtype=dtype)
+        # Official pipeline calls this before every forward pass —
+        # required for schedulers that rescale the input by sigma.
+        latent_input = self.scheduler.scale_model_input(latent_input, t)
         text_embeddings = text_embeddings.to(device=device, dtype=dtype)
         t_batch = t.expand(latent_input.shape[0]).to(device=device)
 

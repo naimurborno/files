@@ -121,6 +121,9 @@ class PixArtSigmaPipelineWrapper:
             device=self.device,
             dtype=torch.float32,
         )
+        # Official pipeline scales raw noise by the scheduler's expected
+        # noise level — required for DPMSolverMultistepScheduler.
+        latents = latents * self.scheduler.init_noise_sigma
         return latents
 
     def decode_latents(self, latents: torch.Tensor) -> Image.Image:
