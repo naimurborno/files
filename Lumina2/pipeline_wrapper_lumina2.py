@@ -96,7 +96,7 @@ class Lumina2PipelineWrapper:
 
         self.pipe = Lumina2Pipeline.from_pretrained(
             model_id,
-            torch_dtype = torch.float16,
+            torch_dtype = torch.float32,
         ).to(self.device)
 
         self.tokenizer    = self.pipe.tokenizer
