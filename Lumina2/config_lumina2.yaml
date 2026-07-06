@@ -246,7 +246,7 @@ flow:
   solver:            "euler"
   t_start:           1.0
   t_end:             0.0
-  cfg_trunc_ratio:   0.25
+  cfg_trunc_ratio:   1.0
   cfg_normalization: false
 
 model_kwargs: {}
