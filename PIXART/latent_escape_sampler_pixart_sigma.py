@@ -122,10 +122,10 @@ class PixArtSigmaUGILESampler:
 
         if x0.dim() == 4:
             B, C, H, W = xi.shape
-            xi_low = F.interpolate(xi, scale_factor=0.45, mode='bilinear',
+            xi_low = F.interpolate(xi, scale_factor=0.40, mode='bilinear',
                                     recompute_scale_factor=False, align_corners=False)
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
-            xi = 0.55 * xi + 0.45 * xi_low
+            xi = 0.50 * xi + 0.50 * xi_low
 
         xi_flat  = xi.flatten()
         x0p_flat = x0_perturbed.flatten()
