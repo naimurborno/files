@@ -3,7 +3,7 @@ model_id:   "futurefrompast/pixart-alpha-512"
 
 device: "cuda"
 seed:   41
-seeds: [41, 42, 43]
+seeds: [41, 42, 43, 44, 45]
 
 prompts:
   - "a photo of an astronaut riding a horse on mars"
@@ -223,7 +223,7 @@ flow:
 ugile:
   sigma_lo:     -1.0
   sigma_hi:     1.0
-  theta_max:    0.9
+  theta_max:    1.2
   noise_scale:  1.5
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
