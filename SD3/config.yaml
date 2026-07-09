@@ -15,7 +15,7 @@ seeds:
   - 41
 
 # ── Prompts now live in a separate file (prompts-only) ────────────────
-prompts_file: "/kaggle/working/files/SD3/prompts.yaml"
+prompts_file: "prompts.yaml"
 
 # (legacy inline list kept only as fallback for other runners; UGILE ignores this)
 
