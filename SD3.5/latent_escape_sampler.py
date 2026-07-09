@@ -1,9 +1,20 @@
 # Hello my name is naimur asif borno
 import math
 import torch
+import yaml
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import torch.nn.functional as F
+
+
+def load_prompts(path: str) -> List[str]:
+    """Load ONLY the prompts list from a separate prompts yaml file."""
+    with open(path, "r") as f:
+        data = yaml.safe_load(f) or {}
+    prompts = data.get("prompts", [])
+    if not prompts:
+        raise ValueError(f"No 'prompts' key found in {path}")
+    return prompts
 
 from peakback_core import (
     tweedie_potential,
@@ -381,7 +392,11 @@ def run_sd3_ugile(opts: dict):
     cfg     = opts.get("_cfg", {})
     device  = opts["device"]
     seeds   = opts.get("seeds") or [opts["seed"]]
-    prompts = cfg.get("prompts") or [opts["prompt"]]
+
+    # Prompts now come from a separate prompts-only yaml file
+    # (config.yaml sets `prompts_file: path/to/prompts.yaml`)
+    prompts_file = cfg.get("prompts_file", "prompts.yaml")
+    prompts = load_prompts(prompts_file)
 
     ug_cfg = cfg.get("ugile", {})
 
@@ -413,18 +428,17 @@ def run_sd3_ugile(opts: dict):
     save_original   = ug_cfg.get("save_original", True)
 
     def _base_path(prompt_idx, seed):
-        stem = base_out.stem + f"_p{prompt_idx}" + (f"_seed{seed}" if multi_seed else "")
-        return original_folder / (stem + "_base" + base_out.suffix)
+        # Filename = prompt position (1-indexed), e.g. prompt 0 -> "1.png"
+        return original_folder / (f"{prompt_idx + 1}" + base_out.suffix)
 
     def _branch_path(prompt_idx, seed, j):
-        stem = base_out.stem + f"_p{prompt_idx}" + (f"_seed{seed}" if multi_seed else "")
-        return diverse_folder / (stem + f"_branch{j}" + base_out.suffix)
+        return diverse_folder / (f"{prompt_idx + 1}" + base_out.suffix)
 
     records = []
     total = len(prompts) * len(seeds)
     done  = 0
 
-    # ADD THIS LINE: Read the offset injected by the parallel runner
+    # Read the offset injected by the parallel runner
     prompt_offset = cfg.get("prompt_offset", 0)
 
     for p_idx, prompt in enumerate(prompts):
@@ -443,17 +457,17 @@ def run_sd3_ugile(opts: dict):
             result  = sampler.run(latents, prompt_embeds, pooled_embeds, seed=seed)
 
             if save_original:
-                # CHANGE THIS: Use global_idx instead of p_idx
+                
                 base_path = _base_path(global_idx, seed)
                 wrapper.decode_latents(result["original_latents"]).save(base_path)
 
             for br in result["branches"]:
-                # CHANGE THIS: Use global_idx instead of p_idx
+                
                 out_path = _branch_path(global_idx, seed, br["branch_idx"])
                 wrapper.decode_latents(br["latents"]).save(out_path)
 
                 records.append({
-                    "prompt_idx": global_idx, # Use global_idx here too
+                    "prompt_idx": global_idx,
                     "prompt"    : prompt,
                     "seed"      : seed,
                     "branch"    : br["branch_idx"],
