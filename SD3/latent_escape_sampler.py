@@ -8,12 +8,18 @@ import torch.nn.functional as F
 
 
 def load_prompts(path: str) -> List[str]:
-    """Load ONLY the prompts list from a separate prompts yaml file."""
+    """Load ONLY the prompts list from a separate prompts yaml file.
+    Accepts either a plain top-level list or a dict with a 'prompts' key."""
     with open(path, "r") as f:
-        data = yaml.safe_load(f) or {}
-    prompts = data.get("prompts", [])
+        data = yaml.safe_load(f)
+    if isinstance(data, list):
+        prompts = data
+    elif isinstance(data, dict):
+        prompts = data.get("prompts", [])
+    else:
+        prompts = []
     if not prompts:
-        raise ValueError(f"No 'prompts' key found in {path}")
+        raise ValueError(f"No prompts found in {path}")
     return prompts
 
 from peakback_core import (
