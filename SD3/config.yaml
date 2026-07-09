@@ -18,7 +18,7 @@ seeds:
 prompts_file: "/kaggle/working/files/SD3/prompts.yaml"
 
 # (legacy inline list kept only as fallback for other runners; UGILE ignores this)
-prompts:
+
 
 
 negative_prompt: "blurry, low quality, ugly, deformed"
