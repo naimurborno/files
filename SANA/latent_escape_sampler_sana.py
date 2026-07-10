@@ -203,7 +203,7 @@ class UGILESampler:
             B, C, H, W = xi.shape
             # Downsample to 60% and back up. This smoothly filters out high-frequency texture
             # noise without creating the pixel-block artifacts a coarser downsample would cause.
-            xi_low = F.interpolate(xi, scale_factor=0.86, mode='bilinear', recompute_scale_factor=False, align_corners=False)
+            xi_low = F.interpolate(xi, scale_factor=0.96, mode='bilinear', recompute_scale_factor=False, align_corners=False)
             xi_low = F.interpolate(xi_low, size=(H, W), mode='bilinear', align_corners=False)
 
             # Blend to preserve some high-frequency detail for natural variation
@@ -350,7 +350,9 @@ class UGILESampler:
             encoder_hidden_states = text_embeddings.to(device=device, dtype=dtype),
         )
         if pooled_embeddings is not None:
-            kwargs["pooled_projections"] = pooled_embeddings.to(device=device, dtype=dtype)
+            # See _velocity_forward: this is SANA's encoder_attention_mask,
+            # not a pooled embedding.
+            kwargs["encoder_attention_mask"] = pooled_embeddings.to(device=device)
 
         with torch.enable_grad():
             output = self.unet(**kwargs).sample
@@ -416,7 +418,11 @@ class UGILESampler:
             encoder_hidden_states = text_embeddings,
         )
         if pooled_embeddings is not None:
-            kwargs["pooled_projections"] = pooled_embeddings.to(device=device, dtype=dtype)
+            # For SANA, wrapper.encode_prompt's 2nd return value is the
+            # Gemma-2 attention mask (SANA has no pooled text embedding —
+            # see pipeline_wrapper_sana.py docstring), so it goes in as
+            # encoder_attention_mask, not pooled_projections.
+            kwargs["encoder_attention_mask"] = pooled_embeddings.to(device=device)
 
         with torch.no_grad():
             output = self.unet(**kwargs).sample
