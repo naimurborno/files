@@ -437,24 +437,31 @@ class UGILESampler:
 #  DROP-IN RUNNER                                                         #
 # ══════════════════════════════════════════════════════════════════════ #
 
-def run_sd3_ugile(opts: dict):
+def run_sana_ugile(opts: dict):
     """
     Drop-in runner for inference.py MODEL_REGISTRY.
-    Set model_name: "sd3_ugile" in config.yaml to activate.
+    Set model_name: "sana_ugile" in config.yaml (or config_sana.yaml) to activate.
 
-    Iterates over all prompts and seeds from config. The model is loaded once
-    and the sampler is reused across all prompts and seeds.
+    Iterates over all prompts and seeds. Prompts come from opts["prompts"],
+    which inference.py already resolved from either the inline `prompts:`
+    list or an external `prompts_file:` (e.g. prompts.yaml / the per-GPU
+    prompts_gpu0.yaml / prompts_gpu1.yaml split files). `opts["prompt_offset"]`
+    (also injected by inference.py from config `prompt_offset:`) keeps output
+    filenames/indices globally consistent when running split across GPUs.
+
+    The model is loaded once and the sampler is reused across all prompts
+    and seeds.
     """
-    from pipeline_wrapper import SD3PipelineWrapper
+    from pipeline_wrapper_sana import SanaPipelineWrapper
 
     cfg     = opts.get("_cfg", {})
     device  = opts["device"]
     seeds   = opts.get("seeds") or [opts["seed"]]
-    prompts = cfg.get("prompts") or [opts["prompt"]]
+    prompts = opts.get("prompts") or [opts["prompt"]]
 
     ug_cfg = cfg.get("ugile", {})
 
-    wrapper = SD3PipelineWrapper(cfg, device=device)
+    wrapper = SanaPipelineWrapper(cfg, device=device)
     wrapper.load()
 
     sampler = UGILESampler(
@@ -493,7 +500,15 @@ def run_sd3_ugile(opts: dict):
     total = len(prompts) * len(seeds)
     done  = 0
 
+    # Read the offset injected by the parallel runner (config `prompt_offset:`,
+    # written by split_and_run_parallel_safe() for GPU-split runs).
+    prompt_offset = opts.get("prompt_offset", cfg.get("prompt_offset", 0))
+
     for p_idx, prompt in enumerate(prompts):
+        # Absolute global index, so filenames/records stay unique & ordered
+        # even when this process only got a slice of the full prompt list.
+        global_idx = p_idx + prompt_offset
+
         prompt_embeds, pooled_embeds = wrapper.encode_prompt(
             prompt, opts["negative_prompt"]
         )
@@ -506,15 +521,15 @@ def run_sd3_ugile(opts: dict):
             result  = sampler.run(latents, prompt_embeds, pooled_embeds, seed=seed)
 
             if save_original:
-                base_path = _base_path(p_idx, seed)
+                base_path = _base_path(global_idx, seed)
                 wrapper.decode_latents(result["original_latents"]).save(base_path)
 
             for br in result["branches"]:
-                out_path = _branch_path(p_idx, seed, br["branch_idx"])
+                out_path = _branch_path(global_idx, seed, br["branch_idx"])
                 wrapper.decode_latents(br["latents"]).save(out_path)
 
                 records.append({
-                    "prompt_idx": p_idx,
+                    "prompt_idx": global_idx,
                     "prompt"    : prompt,
                     "seed"      : seed,
                     "branch"    : br["branch_idx"],

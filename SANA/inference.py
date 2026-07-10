@@ -96,6 +96,29 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def load_prompts(cfg: dict) -> list:
+    """
+    Resolve the prompt list. If `prompts_file` is set in config, prompts are
+    loaded from that external YAML (list form or {"prompts": [...]} form) —
+    this is what the parallel GPU-split runner writes (prompts_gpu0.yaml /
+    prompts_gpu1.yaml). Falls back to the inline `prompts:` key otherwise.
+    """
+    prompts_file = cfg.get("prompts_file")
+    if prompts_file:
+        with open(prompts_file) as pf:
+            data = yaml.safe_load(pf) or {}
+        if isinstance(data, list):
+            prompts_list = data
+        elif isinstance(data, dict):
+            prompts_list = data.get("prompts", [])
+        else:
+            prompts_list = []
+        if not prompts_list:
+            raise ValueError(f"No prompts found in prompts_file '{prompts_file}'.")
+        return prompts_list
+    return cfg.get("prompts", ["a photo of a cat"])
+
+
 def resolve_args(args, cfg: dict) -> dict:
     """Merge CLI args on top of config. CLI always wins."""
     device = args.device or cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu")
@@ -109,10 +132,14 @@ def resolve_args(args, cfg: dict) -> dict:
     else:
         seeds = cfg.get("seeds") or [single_seed]
 
+    prompts_list = load_prompts(cfg)
+
     return {
         "model_name":      cfg.get("model_name", "sd3"),
         "model_id":        cfg.get("model_id", "stabilityai/stable-diffusion-3-medium-diffusers"),
-        "prompt":          args.prompt or (cfg.get("prompts", ["a photo of a cat"])[0]),
+        "prompt":          args.prompt or prompts_list[0],
+        "prompts":         prompts_list,               # resolved prompt list (inline or prompts_file)
+        "prompt_offset":   cfg.get("prompt_offset", 0), # global index offset for parallel GPU splits
         "negative_prompt": cfg.get("negative_prompt", "blurry, low quality, ugly, deformed"),
         "output":          args.output or cfg.get("output", "output.png"),
         "height":          cfg.get("generation", {}).get("height", 512),
