@@ -24,10 +24,6 @@ seed:   41
 # one full UGILE profiling pass + escape branch.
 seeds:
   - 41
-  - 42
-  - 43
-  - 44
-  - 45
 
 
 # ── Prompts ───────────────────────────────────────────────────────────
@@ -83,7 +79,7 @@ ugile:
   sigma_lo:            -1.0
   sigma_hi:            1.0
   escape_scale:        1.0
-  theta_max:           1.2
+  theta_max:           0.9
   walk_steps:          10
   branch_noise:        0.7
   J:                   1
