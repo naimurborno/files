@@ -266,8 +266,17 @@ def run_pixart_sigma_ugile(opts: dict):
     cfg     = opts.get("_cfg", {})
     device  = opts["device"]
     seeds   = opts.get("seeds") or [opts["seed"]]
-    prompts = cfg.get("prompts") or [opts["prompt"]]
     ug_cfg  = cfg.get("ugile", {})
+
+    prompts_file = cfg.get("prompts_file")
+    if prompts_file:
+        import yaml
+        with open(prompts_file) as f:
+            prompts_cfg = yaml.safe_load(f)
+        prompts = prompts_cfg.get("prompts") or prompts_cfg
+        print(f"[UGILE-PixArtSigma] Loaded {len(prompts)} prompt(s) from {prompts_file}")
+    else:
+        prompts = cfg.get("prompts") or [opts["prompt"]]
 
     print(f"[UGILE-PixArtSigma] Loading model…")
     wrapper = PixArtSigmaPipelineWrapper(cfg, device=device)
