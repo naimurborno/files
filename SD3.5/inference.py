@@ -84,6 +84,22 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def load_prompts_from_config(cfg: dict) -> list:
+    """If cfg['prompts_file'] is set, load prompts from that YAML file
+    (expects a top-level `prompts:` list). Otherwise fall back to the
+    inline cfg['prompts'] list."""
+    prompts_file = cfg.get("prompts_file")
+    if prompts_file:
+        with open(prompts_file) as f:
+            pdata = yaml.safe_load(f)
+        prompts = pdata.get("prompts", []) if isinstance(pdata, dict) else pdata
+        if not prompts:
+            raise ValueError(f"No `prompts:` list found in {prompts_file}")
+        print(f"[Prompts] Loaded {len(prompts)} prompt(s) from {prompts_file}")
+        return prompts
+    return cfg.get("prompts", ["a photo of a cat"])
+
+
 def resolve_args(args, cfg: dict) -> dict:
     """Merge CLI args on top of config. CLI always wins."""
     device = args.device or cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu")
@@ -100,7 +116,7 @@ def resolve_args(args, cfg: dict) -> dict:
     return {
         "model_name":      cfg.get("model_name", "sd3"),
         "model_id":        cfg.get("model_id", "stabilityai/stable-diffusion-3-medium-diffusers"),
-        "prompt":          args.prompt or (cfg.get("prompts", ["a photo of a cat"])[0]),
+        "prompt":          args.prompt or load_prompts_from_config(cfg)[0],
         "negative_prompt": cfg.get("negative_prompt", "blurry, low quality, ugly, deformed"),
         "output":          args.output or cfg.get("output", "output.png"),
         "height":          cfg.get("generation", {}).get("height", 512),
