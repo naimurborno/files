@@ -1,6 +1,6 @@
 # ── Active model ────────────────────────────────────────────────────
 model_name: "sd3_divin"
-model_id:   "stabilityai/stable-diffusion-3.5-medium"
+model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
 
 
 # ── Device & seed ────────────────────────────────────────────────────
