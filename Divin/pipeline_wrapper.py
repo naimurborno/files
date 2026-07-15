@@ -120,28 +120,24 @@ class SD3PipelineWrapper:
 
         def _tok(tokenizer, text, max_length):
             return tokenizer(
-                text,
-                padding        = "max_length",
-                max_length     = max_length,
-                truncation     = True,
-                return_tensors = "pt",
+                text, padding="max_length", max_length=max_length,
+                truncation=True, return_tensors="pt",
             ).input_ids.to(self.device)
 
         ids_l    = _tok(self.tokenizer, text, max_len_clip)
         out_l    = self.text_encoder(ids_l, output_hidden_states=True)
         emb_l    = out_l.hidden_states[-2]
-        pooled_l = out_l.text_embeds   # use the model's own EOS-pooled + projected output,
-                                        # not the raw hidden state at the last (padding) position
+        pooled_l = out_l.text_embeds     # ← fix: use the model's own pooled projection
 
         ids_g    = _tok(self.tokenizer_2, text, max_len_clip)
         out_g    = self.text_encoder_2(ids_g, output_hidden_states=True)
         emb_g    = out_g.hidden_states[-2]
         pooled_g = out_g.text_embeds
 
-        D_joint      = 4096
-        emb_l_pad    = torch.nn.functional.pad(emb_l, (0, D_joint - emb_l.shape[-1]))
-        emb_g_pad    = torch.nn.functional.pad(emb_g, (0, D_joint - emb_g.shape[-1]))
-        emb_t5_zero  = torch.zeros(1, 256, D_joint, dtype=emb_l.dtype, device=self.device)
+        D_joint     = 4096
+        emb_l_pad   = torch.nn.functional.pad(emb_l, (0, D_joint - emb_l.shape[-1]))
+        emb_g_pad   = torch.nn.functional.pad(emb_g, (0, D_joint - emb_g.shape[-1]))
+        emb_t5_zero = torch.zeros(1, 256, D_joint, dtype=emb_l.dtype, device=self.device)
 
         emb_all = torch.cat([emb_l_pad, emb_g_pad, emb_t5_zero], dim=1)
         pooled  = torch.cat([pooled_l, pooled_g], dim=-1)
