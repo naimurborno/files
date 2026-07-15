@@ -71,7 +71,7 @@ class SD3PipelineWrapper:
         self.text_encoder_2 = self.pipe.text_encoder_2
         self.text_encoder_3 = None
         self.transformer    = self.pipe.transformer
-        self.vae            = self.pipe.vae
+        self.vae            = self.pipe.vae.to(torch.float32)
 
         self.scheduler = FlowMatchEulerDiscreteScheduler.from_config(
             self.pipe.scheduler.config
@@ -189,10 +189,10 @@ class SD3PipelineWrapper:
 
         latents = latents.to(dtype=torch.float32)               # fp32 for stable decode
         latents = latents / scaling_factor + shift_factor        # correct unscaling
-        latents = latents.to(dtype=torch.float32)               # back to fp16 for VAE
+        latents = latents.to(dtype=torch.float16)               # back to fp16 for VAE
 
         with torch.no_grad():
-            image = self.vae.decode(latents.to(dtype=self.vae.dtype)).sample
+            image = self.vae.decode(latents).sample
 
         image = (image / 2 + 0.5).clamp(0, 1)
         image = image.cpu().permute(0, 2, 3, 1).float().numpy()
