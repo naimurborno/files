@@ -44,6 +44,7 @@ class DivInSampler:
         max_steps    : int   = 1,      # number of Langevin steps
         temperature  : float = 0.6,    # Langevin temperature (beta)
         gen_num      : int   = 4,      # number of diverse images per prompt (ipp)
+        save_original: bool  = True,   # run an extra plain (non-Langevin) denoise
     ):
         self.unet        = unet
         self.scheduler   = scheduler
@@ -53,6 +54,7 @@ class DivInSampler:
         self.max_steps   = max_steps
         self.temperature = temperature
         self.gen_num     = gen_num
+        self.save_original = save_original
 
         f_cfg               = cfg.get("flow", {})
         self.num_steps      = f_cfg.get("num_steps",      50)
@@ -92,12 +94,21 @@ class DivInSampler:
         )
 
         # --- ORIGINAL (non-diverse) latent: plain seeded init, no Langevin ---
-        original_final = self._full_forward_pass(latents.clone(), text_embeddings, pooled_embeddings)
+        # Skipped unless explicitly requested — this is an extra full denoise
+        # pass the original DivIn script never performed.
+        original_final = None
+        if self.save_original:
+            original_final = self._full_forward_pass(latents.clone(), text_embeddings, pooled_embeddings)
+            torch.cuda.empty_cache()
 
         # --- Phase: Langevin walk on `ipp` initial latents ---
+        model_dtype = next(self.unet.parameters()).dtype
         with torch.enable_grad():
             torch.manual_seed(seed)
-            lat = torch.randn((ipp, *latents.shape[1:]), device=latents.device, requires_grad=True)
+            lat = torch.randn(
+                (ipp, *latents.shape[1:]), device=latents.device, dtype=model_dtype
+            )
+            lat.requires_grad_(True)
 
             step_cnt = 0
             while step_cnt < self.max_steps + 1:
@@ -125,16 +136,20 @@ class DivInSampler:
 
                 step_cnt += 1
 
-            diverse_init = lat.detach()
-            torch.cuda.empty_cache()
+            diverse_init = lat.detach().clone()
+            del lat, uc_pred, c_pred, v_vec, loss_indiv, loss, noise_pred, lat_model_input
+        torch.cuda.empty_cache()
 
         # --- Denoise each diverse-init branch with standard CFG loop ---
+        # (kept sequential, batch=1, so peak memory ≈ one single-image denoise
+        # rather than a batched gen_num-wide denoise)
         branches = []
         for j in range(ipp):
             x_final = self._full_forward_pass(
                 diverse_init[j:j + 1], text_embeddings, pooled_embeddings
             )
-            branches.append({"branch_idx": j, "latents": x_final})
+            branches.append({"branch_idx": j, "latents": x_final.detach()})
+            torch.cuda.empty_cache()
 
         return {"original_latents": original_final, "branches": branches}
 
@@ -202,6 +217,7 @@ def run_sd3_divin(opts: dict):
         max_steps   = dv_cfg.get("max_steps",   1),
         temperature = dv_cfg.get("temperature", 0.6),
         gen_num     = dv_cfg.get("gen_num",     4),
+        save_original = dv_cfg.get("save_original", True),
     )
 
     base_out        = Path(opts["output"])
@@ -229,7 +245,7 @@ def run_sd3_divin(opts: dict):
             latents = wrapper.get_initial_latents(seed=seed)
             result = sampler.run(latents, prompt_embeds, pooled_embeds, seed=seed)
 
-            if save_original:
+            if save_original and result["original_latents"] is not None:
                 base_path = original_folder / (f"{global_idx + 1}" + base_out.suffix)
                 wrapper.decode_latents(result["original_latents"]).save(base_path)
 
