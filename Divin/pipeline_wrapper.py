@@ -130,7 +130,8 @@ class SD3PipelineWrapper:
         ids_l    = _tok(self.tokenizer, text, max_len_clip)
         out_l    = self.text_encoder(ids_l, output_hidden_states=True)
         emb_l    = out_l.hidden_states[-2]
-        pooled_l = out_l.hidden_states[-1][:, -1, :]
+        pooled_l = out_l.text_embeds   # use the model's own EOS-pooled + projected output,
+                                        # not the raw hidden state at the last (padding) position
 
         ids_g    = _tok(self.tokenizer_2, text, max_len_clip)
         out_g    = self.text_encoder_2(ids_g, output_hidden_states=True)
