@@ -192,7 +192,7 @@ class SD3PipelineWrapper:
         latents = latents.to(dtype=torch.float32)               # back to fp16 for VAE
 
         with torch.no_grad():
-            image = self.vae.decode(latents).sample
+            image = self.vae.decode(latents.to(dtype=self.vae.dtype)).sample
 
         image = (image / 2 + 0.5).clamp(0, 1)
         image = image.cpu().permute(0, 2, 3, 1).float().numpy()
