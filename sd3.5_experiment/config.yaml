@@ -1,0 +1,123 @@
+# ── Active model ────────────────────────────────────────────────────
+model_name: "sd3_ugile"
+model_id:   "stabilityai/stable-diffusion-3.5-medium"
+
+
+# ── Device & seed ────────────────────────────────────────────────────
+device: "cuda"   # cuda | cpu | mps
+seed:   41       # fallback seed used by non-ONLB models and --seed CLI override
+
+# ── Multi-seed generation (sd3_onlb only) ────────────────────────────
+# Each seed produces one independent diverse image from the same prompt.
+# The model is loaded only once; all seeds share the same weights.
+# Remove or leave empty to fall back to the single `seed` value above.
+seeds:
+  - 41
+
+# ── Prompts ───────────────────────────────────────────────────────────
+# If prompts_file is set, prompts are loaded from that external YAML file
+# (must contain a top-level `prompts:` list) instead of the inline list below.
+prompts_file: "prompts.yaml"
+
+# Inline fallback (used only if prompts_file is unset/missing):
+negative_prompt: "blurry, low quality, ugly, deformed"
+
+# ── Output path ──────────────────────────────────────────────────────
+# For multi-seed runs the seed index is appended automatically, e.g.:
+#   output11_seed41.png, output11_seed42.png, …
+output: "prompt20.png"
+diverse_output_dir:  "outputs/diverse"    # folder for ONLB diverse images
+original_output_dir: "outputs/original"   # folder for original (non-diverse) images
+
+# ── Image generation ─────────────────────────────────────────────────
+generation:
+  height: 512
+  width:  512
+
+# ── Flow / Scheduler (used by sd3, flux, sana, lumina) ───────────────
+flow:
+  num_steps:      50
+  guidance_scale: 4.0
+  solver:         "euler"    # euler | heun
+  t_start:        1.0
+  t_end:          0.0
+
+# ── Model-specific extra kwargs ──────────────────────────────────────
+# These are passed through to the model loader as opts["model_kwargs"].
+# Add any model-specific settings here.
+model_kwargs: {}
+
+# ── Trajectory saving (run_experiment.py only) ───────────────────────
+save_trajectory: false
+onlb:
+  alpha:         2.0    # traversal modulation strength
+  sigma_thresh:  0.3    # gates β_k to high-noise regime
+  eta:           0.07   # Langevin temperature
+  mu:            0.05   # CFG push weight
+  target_cos:   -0.5    # τ — minimum angular separation
+  sigma_thresh: 0.3
+  diverse_output_dir:  "outputs/diverse"    # folder for ONLB diverse images
+  original_output_dir: "outputs/original"   # folder for original (non-diverse) images
+  save_original: true
+peakback:
+  sigma_lo:       0.15
+  sigma_hi:       0.45
+  quantile_alpha: 0.15
+  eta:            1.0
+  K_max:          15
+  theta_max:      0.25
+  delta:          0.5
+  min_sep:        3
+  J:              2
+  min_sep:        3
+  exact_leverage: false
+  diverse_output_dir:  "outputs/diverse"
+  original_output_dir: "outputs/original"
+  save_original: true
+
+ugile:
+  num_grad_steps:      50      # backward passes for escape direction
+  sigma_lo:            -1.0   # which cached steps to use
+  sigma_hi:            1.0
+  escape_scale:        1.0    # how far to push x_0 along escape direction
+  theta_max:           0.65   # max geodesic angle
+  walk_steps:          10     # split into 10 small steps of 0.06 rad each
+  branch_noise:        0.7    # lateral offset for inter-branch diversity
+  J:                   1      # number of diverse images per seed
+  noise_scale:         8.0    # base scale of the boundary/curvature noise injection
+  gamma:                1.2
+  xi_mix:               0.80  # blend ratio for xi = xi_mix*xi_low + (1-xi_mix)*xi_high
+  diverse_output_dir:  "outputs/diverse"
+  original_output_dir: "outputs/original"
+  save_original:       true
+
+# ── Full hyperparameter-sweep experiment (run_experiment.py) ─────────
+# Any key under `sweep:` that is a YAML list is swept (cartesian product
+# across all listed keys). A key with a single scalar value is held fixed
+# for the whole sweep. Every key here maps 1:1 onto a UGILESampler kwarg.
+experiment:
+  root_dir:            "outputs/experiments"   # per-combo image folders live here
+  results_csv:          "experiment_results.csv"
+  num_prompts:          null      # null = use all prompts in prompts_file; int = truncate for a quick run
+  vendi_seeds:          [41, 42, 43, 44, 45]   # 5 seeds/prompt -> intra-prompt Vendi diversity
+  eval_seed:             41              # one of the 5 above -> FID/KID/CLIP/Precision/Recall
+  real_reference_dir:    null      # optional path to a real-image reference set for FID/KID/P&R vs real
+  sweep:
+    theta_max:        [0.35, 0.50, 0.65, 0.80]
+    noise_scale:       [4.0, 8.0, 12.0]
+    xi_mix:             [0.60, 0.80, 0.95]
+    escape_scale:       [1.0]
+    sigma_lo:           [-1.0]
+    sigma_hi:            [1.0]
+    walk_steps:          [10]
+    num_grad_steps:      [50]
+    gamma:                [1.2]
+    J:                     [1]
+
+# ── PeakBack swap example ────────────────────────────────────────────
+# model_name: "sd3_peakback"
+# model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
+
+# ── ONLB swap example ────────────────────────────────────────────────
+# model_name: "sd3_onlb"
+# model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"

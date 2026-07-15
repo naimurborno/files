@@ -1,0 +1,59 @@
+# ── Active model ────────────────────────────────────────────────────
+model_name: "sd3_divin"
+model_id:   "stabilityai/stable-diffusion-3.5-medium"
+
+
+# ── Device & seed ────────────────────────────────────────────────────
+device: "cuda"   # cuda | cpu | mps
+seed:   41       # fallback seed used by non-ONLB models and --seed CLI override
+
+# ── Multi-seed generation (sd3_divin only) ───────────────────────────
+# Each seed produces one independent diverse image from the same prompt.
+# The model is loaded only once; all seeds share the same weights.
+# Remove or leave empty to fall back to the single `seed` value above.
+seeds:
+  - 41
+
+# ── Prompts ───────────────────────────────────────────────────────────
+# If prompts_file is set, prompts are loaded from that external YAML file
+# (must contain a top-level `prompts:` list) instead of the inline list below.
+prompts_file: "prompts.yaml"
+
+# Inline fallback (used only if prompts_file is unset/missing):
+negative_prompt: "blurry, low quality, ugly, deformed"
+
+# ── Output path ──────────────────────────────────────────────────────
+# For multi-seed runs the seed index is appended automatically, e.g.:
+#   output11_seed41.png, output11_seed42.png, …
+output: "prompt20.png"
+diverse_output_dir:  "outputs/diverse"    # folder for ONLB diverse images
+original_output_dir: "outputs/original"   # folder for original (non-diverse) images
+
+# ── Image generation ─────────────────────────────────────────────────
+generation:
+  height: 512
+  width:  512
+
+# ── Flow / Scheduler (used by sd3, flux, sana, lumina) ───────────────
+flow:
+  num_steps:      50
+  guidance_scale: 4.0
+  solver:         "euler"    # euler | heun
+  t_start:        1.0
+  t_end:          0.0
+
+# ── Model-specific extra kwargs ──────────────────────────────────────
+# These are passed through to the model loader as opts["model_kwargs"].
+# Add any model-specific settings here.
+model_kwargs: {}
+
+# ── Trajectory saving (run_experiment.py only) ───────────────────────
+save_trajectory: false
+divin:
+  lr:                  0.05   # Langevin step size (eta)
+  max_steps:           1      # number of Langevin steps
+  temperature:         0.6    # Langevin temperature (beta)
+  gen_num:             4      # number of diverse images per prompt/seed
+  diverse_output_dir:  "outputs/diverse"    # folder for DivIn diverse images
+  original_output_dir: "outputs/original"   # folder for original (non-diverse) images
+  save_original:       true
