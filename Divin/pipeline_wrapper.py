@@ -189,7 +189,7 @@ class SD3PipelineWrapper:
 
         latents = latents.to(dtype=torch.float32)               # fp32 for stable decode
         latents = latents / scaling_factor + shift_factor        # correct unscaling
-        latents = latents.to(dtype=torch.float16)               # back to fp16 for VAE
+        latents = latents.to(dtype=torch.float32)               # back to fp16 for VAE
 
         with torch.no_grad():
             image = self.vae.decode(latents).sample
