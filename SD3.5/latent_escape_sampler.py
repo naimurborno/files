@@ -40,7 +40,7 @@ class UGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
-        noise_scale     : float = 10.0,   # Lowered base scale for SD3 stability
+        noise_scale     : float = 8.0,   # Lowered base scale for SD3 stability
         gamma           : float = 1.2,
     ):
         self.unet           = unet
@@ -170,7 +170,7 @@ class UGILESampler:
             xi_low = F.conv2d(xi, kernel, padding=5, groups=C)
             
             # 60% low-freq (pose) + 40% high-freq (natural texture diversity)
-            xi = 0.65 * xi_low + 0.35 * xi
+            xi = 0.80 * xi_low + 0.20 * xi
 
         # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
         xi_flat = xi.flatten()
