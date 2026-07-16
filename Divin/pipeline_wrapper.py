@@ -126,20 +126,24 @@ class SD3PipelineWrapper:
 
         ids_l    = _tok(self.tokenizer, text, max_len_clip)
         out_l    = self.text_encoder(ids_l, output_hidden_states=True)
-        emb_l    = out_l.hidden_states[-2]
-        pooled_l = out_l.hidden_states[-1][:, -1, :]    # ← fix: use the model's own pooled projection
+        emb_l    = out_l.hidden_states[-2]        # (B, 77, 768)
+        pooled_l = out_l.text_embeds
 
         ids_g    = _tok(self.tokenizer_2, text, max_len_clip)
         out_g    = self.text_encoder_2(ids_g, output_hidden_states=True)
-        emb_g    = out_g.hidden_states[-2]
+        emb_g    = out_g.hidden_states[-2]        # (B, 77, 1280)
         pooled_g = out_g.text_embeds
 
-        D_joint     = 4096
-        emb_l_pad   = torch.nn.functional.pad(emb_l, (0, D_joint - emb_l.shape[-1]))
-        emb_g_pad   = torch.nn.functional.pad(emb_g, (0, D_joint - emb_g.shape[-1]))
+        # 1. Combine CLIP-L + CLIP-G along FEATURE dim, then pad to T5 width
+        clip_joint = torch.cat([emb_l, emb_g], dim=-1)                     # (B, 77, 2048)
+        D_joint    = 4096
+        clip_joint = torch.nn.functional.pad(clip_joint, (0, D_joint - clip_joint.shape[-1]))  # (B, 77, 4096)
+
+        # 2. T5 block (zeroed placeholder, 256 tokens)
         emb_t5_zero = torch.zeros(1, 256, D_joint, dtype=emb_l.dtype, device=self.device)
 
-        emb_all = torch.cat([emb_l_pad, emb_g_pad, emb_t5_zero], dim=1)
+        # 3. Concatenate along SEQUENCE dim
+        emb_all = torch.cat([clip_joint, emb_t5_zero], dim=1)   # (B, 333, 4096)
         pooled  = torch.cat([pooled_l, pooled_g], dim=-1)
 
         return emb_all, pooled
