@@ -1,0 +1,33 @@
+# =========================================================================
+# CADS config — Condition-Annealed Diffusion Sampler (arXiv:2310.17347)
+# Model: Stable Diffusion 1.5 (runwayml/stable-diffusion-v1-5)
+#
+# Default cads.* values below mirror the paper's own Stable-Diffusion row
+# in Table 13 (Appendix G): w_CFG=9, tau1=0.6, tau2=0.9, s=0.25, psi=1.0
+# =========================================================================
+
+model:
+  model_id: "runwayml/stable-diffusion-v1-5"
+  dtype: "float16"          # "float16" on GPU, "float32" on CPU
+
+generation:
+  prompt: "An astronaut on the Moon"
+  negative_prompt: ""
+  num_inference_steps: 50
+  guidance_scale: 9.0        # w_CFG in the paper
+  height: 512
+  width: 512
+  seed: 42
+  num_samples: 4             # how many images to draw for this prompt (diversity comparison)
+  use_cads: true             # set false to render plain CFG/DDIM baseline for comparison
+
+cads:
+  tau1: 0.6                  # annealing cut-off: no corruption for normalized t <= tau1
+  tau2: 0.9                  # full corruption for normalized t >= tau2
+  noise_scale: 0.25          # s in Eq. (1)
+  psi: 1.0                   # mixing factor in Eq. (4); 1.0 = fully rescaled (paper's recommendation)
+  rescale: true              # apply Eq. (3)-(4) rescaling
+  apply_to: "both"           # "both" = anneal cond + null embeddings, "cond_only" = anneal cond only
+
+output:
+  output_dir: "/mnt/user-data/outputs/cads_samples"
