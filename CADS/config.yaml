@@ -25,9 +25,9 @@ generation:
   use_cads: true             # set false to render plain CFG/DDIM baseline for comparison
 
 cads:
-  tau1: 0.6                  # annealing cut-off: no corruption for normalized t <= tau1
+  tau1: 0.7                  # annealing cut-off: no corruption for normalized t <= tau1
   tau2: 0.9                  # full corruption for normalized t >= tau2
-  noise_scale: 0.25          # s in Eq. (1)
+  noise_scale: 0.15          # s in Eq. (1)
   psi: 1.0                   # mixing factor in Eq. (4); 1.0 = fully rescaled (paper's recommendation)
   rescale: true              # apply Eq. (3)-(4) rescaling
   apply_to: "both"           # "both" = anneal cond + null embeddings, "cond_only" = anneal cond only
