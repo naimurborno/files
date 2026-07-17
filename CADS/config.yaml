@@ -7,7 +7,7 @@
 # =========================================================================
 
 model:
-  model_id: "stabilityai/stable-diffusion-2-1"
+  model_id: "sd2-community/stable-diffusion-2-1"
   dtype: "float16"          # "float16" on GPU, "float32" on CPU
 
 # These two keys are placeholders — the launcher script overwrites them
