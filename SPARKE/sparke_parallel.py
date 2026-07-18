@@ -1,3 +1,29 @@
+import os
+os.environ["DIFFUSERS_NO_PROGRESS"] = "1"
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+
+# Suppress all tqdm/progress output
+import sys
+class _DummyTqdm:
+    def __init__(self, *a, **k): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+    def update(self, n=1): pass
+    def set_postfix(self, **k): pass
+    def close(self): pass
+    @property
+    def n(self): return 0
+    @property
+    def total(self): return 0
+
+# Patch tqdm before diffusers imports it
+try:
+    import tqdm
+    tqdm.tqdm = _DummyTqdm
+    tqdm.trange = lambda *a, **k: range(*a)
+except ImportError:
+    pass
+
 """
 SPARKE Pipeline with YAML Prompt Loading + Dual GPU Parallel Execution
 
@@ -404,7 +430,9 @@ class SPARKEGuidedStableDiffusionPipeline(DiffusionPipeline, StableDiffusionMixi
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
 
-        with self.progress_bar(total=num_inference_steps) as progress_bar:
+        # Progress bar disabled - generating silently
+        _pb = type("_", (), {"update": lambda s: None})()  # no-op progress bar
+        with type("_ctx", (), {"__enter__": lambda s: _pb, "__exit__": lambda s, *a: None})() as progress_bar:
             for i, t in enumerate(timesteps):
                 if self._interrupt:
                     continue
