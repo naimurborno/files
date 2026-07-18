@@ -1,0 +1,33 @@
+# SPARKE Parallel Generation Config
+# This config controls the generation pipeline
+
+# Model
+model_id: "sd2-community/stable-diffusion-2-1"
+
+# Paths
+prompts_file: "prompts.yaml"
+output_dir: "./outputs"
+
+# Image dimensions
+height: 768
+width: 768
+
+# Inference settings
+num_inference_steps: 50
+guidance_scale: 7.5
+num_images_per_prompt: 1
+negative_prompt: ""
+
+# Seed (set to null for random)
+seed: 42
+
+# Data type: "float16" or "float32"
+dtype: "float16"
+
+# SPARKE Diversity Guidance Settings
+sparke_enabled: true
+criteria_guidance_scale: 0.03    # eta - diversity strength (0 = disabled)
+guidance_freq: 10                # apply guidance every N steps
+sigma_img: 0.8                   # image kernel bandwidth
+sigma_text: 0.3                  # text kernel bandwidth
+text_kernel: "rbf"               # "rbf" or "cosine"
