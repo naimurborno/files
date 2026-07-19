@@ -278,6 +278,15 @@ def run_pixart_sigma_ugile(opts: dict):
     else:
         prompts = cfg.get("prompts") or [opts["prompt"]]
 
+    # Global position of the FIRST prompt in this process's slice, within the
+    # full prompts file. Each GPU process only receives a subset of prompts
+    # (e.g. GPU0 -> prompts 1-500, GPU1 -> prompts 501-1000), so a plain
+    # enumerate() restarts at 0 on every process and produces identical
+    # filenames ("..._p0_base.png") across GPUs, silently overwriting each
+    # other's output. Passing the true offset fixes filenames to reflect the
+    # prompt's absolute position in the source file.
+    prompt_offset = opts.get("prompt_offset", cfg.get("prompt_offset", 0))
+
     print(f"[UGILE-PixArtSigma] Loading model…")
     wrapper = PixArtSigmaPipelineWrapper(cfg, device=device)
     wrapper.load()
@@ -311,8 +320,9 @@ def run_pixart_sigma_ugile(opts: dict):
         return diverse_folder / (stem + f"_branch{j}" + base_out.suffix)
 
     records = []
-    for p_idx, prompt in enumerate(prompts):
-        print(f"\n[UGILE-PixArtSigma] Prompt {p_idx + 1}/{len(prompts)}: \"{prompt}\"")
+    for local_idx, prompt in enumerate(prompts):
+        p_idx = prompt_offset + local_idx  # absolute position in the full prompts file
+        print(f"\n[UGILE-PixArtSigma] Prompt {p_idx + 1} (local {local_idx + 1}/{len(prompts)}): \"{prompt}\"")
         prompt_embeds, attention_mask = wrapper.encode_prompt(prompt, opts["negative_prompt"])
 
         for seed in seeds:

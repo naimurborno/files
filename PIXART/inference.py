@@ -106,6 +106,12 @@ def parse_args():
     p.add_argument("--output",  type=str, default=None, help="Overrides config output path")
     p.add_argument("--seed",    type=int, default=None, help="Overrides config seed (single seed)")
     p.add_argument("--device",  type=str, default=None, help="Overrides config device")
+    p.add_argument("--prompt-offset", type=int, default=None,
+                   help="Absolute index of this process's first prompt within "
+                        "the full prompts_file (e.g. 500 for the GPU handling "
+                        "prompts 501-1000). Used so output filenames reflect "
+                        "each prompt's true position instead of restarting at "
+                        "0 on every process.")
     return p.parse_args()
 
 
@@ -145,6 +151,12 @@ def resolve_args(args, cfg: dict) -> dict:
         "seed":            single_seed,   # kept for non-ONLB runners
         "seeds":           seeds,         # used by sd3_onlb multi-seed loop
         "device":          device,
+        # Absolute position of this process's first prompt in the full
+        # prompts file. CLI > config > default 0. Required when splitting
+        # one prompts_file across multiple GPU processes so filenames don't
+        # collide (see run_pixart_sigma_ugile).
+        "prompt_offset":   args.prompt_offset if args.prompt_offset is not None
+                           else cfg.get("prompt_offset", 0),
         # model-specific extras (pass through wholesale)
         "model_kwargs":    cfg.get("model_kwargs", {}),
     }
