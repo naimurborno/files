@@ -40,7 +40,7 @@ class UGILESampler:
         walk_steps      : int   = 10,
         J               : int   = 1,
         eps             : float = 1e-8,
-        noise_scale     : float = 8.0,   # Lowered base scale for SD3 stability
+        noise_scale     : float = 10.0,   # Lowered base scale for SD3 stability
         gamma           : float = 1.2,
     ):
         self.unet           = unet
