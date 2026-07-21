@@ -3,7 +3,7 @@ model_id:   "futurefrompast/pixart-alpha-512"
 
 device: "cuda"
 seed:   41
-seeds: [41]
+seeds: [41, 42, 43, 44, 45]
 
 prompts_file: "prompts.yaml"
 
@@ -22,7 +22,7 @@ flow:
 ugile:
   sigma_lo:     -1.0
   sigma_hi:     1.0
-  theta_max:    1.5
+  theta_max:    2.0
   noise_scale:  15
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
