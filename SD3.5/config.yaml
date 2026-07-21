@@ -13,6 +13,10 @@ seed:   41       # fallback seed used by non-ONLB models and --seed CLI override
 # Remove or leave empty to fall back to the single `seed` value above.
 seeds:
   - 41
+  - 42
+  - 43
+  - 44
+  - 45 
 
 # ── Prompts ───────────────────────────────────────────────────────────
 # If prompts_file is set, prompts are loaded from that external YAML file
