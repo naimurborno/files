@@ -50,6 +50,21 @@ def clean_seed(raw_seed):
     return int(raw_seed)
 
 
+def clean_seeds(raw_seed) -> list:
+    """Normalize the `seed` config value into a list of seeds to run.
+
+    Accepts:
+      - a single int/str seed          -> [seed]
+      - a list of ints/strs            -> [seed0, seed1, ...]
+      - None                           -> [None]  (random, one image)
+    """
+    if raw_seed is None:
+        return [None]
+    if isinstance(raw_seed, (list, tuple)):
+        return [clean_seed(s) for s in raw_seed]
+    return [clean_seed(raw_seed)]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True)
@@ -98,34 +113,33 @@ def main():
     out_dir = cfg["output"]["output_dir"]
     os.makedirs(out_dir, exist_ok=True)
 
-    base_seed = clean_seed(gen_cfg.get("seed", None))
+    # `seed` in config can be a single value OR a list, e.g. [41, 42, 43, 44, 45].
+    # Every seed in the list is rendered for EVERY prompt (same prompt, different seeds).
+    seeds = clean_seeds(gen_cfg.get("seed", None))
 
     for local_i, prompt in enumerate(prompts):
         global_i = prompt_offset + local_i
 
-        # Deterministic per-prompt seed offset by GLOBAL index, so GPU0/GPU1
-        # never collide on the same seed and results stay reproducible
-        # regardless of how the prompt list is split across GPUs.
-        seed_i = None if base_seed is None else base_seed + global_i
+        for seed_i in seeds:
+            g = CADSGenerationConfig(
+                prompt=prompt,
+                negative_prompt=gen_cfg.get("negative_prompt", ""),
+                num_inference_steps=gen_cfg.get("num_inference_steps", 50),
+                guidance_scale=gen_cfg.get("guidance_scale", 9.0),
+                height=gen_cfg.get("height", 768),
+                width=gen_cfg.get("width", 768),
+                seed=seed_i,
+                use_cads=gen_cfg.get("use_cads", True),
+            )
 
-        g = CADSGenerationConfig(
-            prompt=prompt,
-            negative_prompt=gen_cfg.get("negative_prompt", ""),
-            num_inference_steps=gen_cfg.get("num_inference_steps", 50),
-            guidance_scale=gen_cfg.get("guidance_scale", 9.0),
-            height=gen_cfg.get("height", 768),
-            width=gen_cfg.get("width", 768),
-            seed=seed_i,
-            use_cads=gen_cfg.get("use_cads", True),
-        )
+            print(f"[GPU {device_tag}] ({local_i+1}/{len(prompts)}, global#{global_i}) "
+                  f"seed={seed_i} :: \"{prompt}\"")
 
-        print(f"[GPU {device_tag}] ({local_i+1}/{len(prompts)}, global#{global_i}) "
-              f"seed={seed_i} :: \"{prompt}\"")
-
-        image = model.generate(g)
-        out_path = os.path.join(out_dir, f"{global_i}.png")
-        image.save(out_path)
-        print(f"[GPU {device_tag}] Saved: {out_path}")
+            image = model.generate(g)
+            seed_tag = f"seed{seed_i}" if seed_i is not None else "randseed"
+            out_path = os.path.join(out_dir, f"{global_i}_{seed_tag}.png")
+            image.save(out_path)
+            print(f"[GPU {device_tag}] Saved: {out_path}")
 
     print(f"[GPU {device_tag}] ✅ Done — {len(prompts)} prompts rendered.")
 

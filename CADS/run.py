@@ -47,11 +47,18 @@ def main(config_path: str):
     out_dir = cfg["output"]["output_dir"]
     os.makedirs(out_dir, exist_ok=True)
 
-    num_samples = gen_cfg.get("num_samples", 1)
-    base_seed = gen_cfg.get("seed", None)
+    # `seed` can be a single int OR a list, e.g. [41, 42, 43, 44, 45].
+    # Each seed in the list generates the SAME prompt once (multi-seed variants).
+    raw_seed = gen_cfg.get("seed", None)
+    if isinstance(raw_seed, (list, tuple)):
+        seeds = list(raw_seed)
+    elif raw_seed is None:
+        seeds = [None] * gen_cfg.get("num_samples", 1)
+    else:
+        # backward compat: single base seed + num_samples -> base_seed + i
+        seeds = [raw_seed + i for i in range(gen_cfg.get("num_samples", 1))]
 
-    for i in range(num_samples):
-        seed_i = None if base_seed is None else base_seed + i
+    for i, seed_i in enumerate(seeds):
         g = CADSGenerationConfig(
             prompt=gen_cfg["prompt"],
             negative_prompt=gen_cfg.get("negative_prompt", ""),
@@ -62,7 +69,7 @@ def main(config_path: str):
             seed=seed_i,
             use_cads=gen_cfg.get("use_cads", True),
         )
-        print(f"Sampling {i+1}/{num_samples} (seed={seed_i}, use_cads={g.use_cads}) ...")
+        print(f"Sampling {i+1}/{len(seeds)} (seed={seed_i}, use_cads={g.use_cads}) ...")
         image = model.generate(g)
         tag = "cads" if g.use_cads else "baseline"
         out_path = os.path.join(out_dir, f"{tag}_seed{seed_i}.png")
