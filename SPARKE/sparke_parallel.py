@@ -554,12 +554,12 @@ def generate_on_gpu(
             "text_encoder": pipe.text_encoder,
         })()
 
-    # Prepare generator
-    seed = config.get("seed")
-    if seed is not None:
-        generator = torch.Generator(device=device).manual_seed(seed)
-    else:
-        generator = None
+    # Prepare seeds: supports either a single `seed` (backward compat) or a
+    # list `seeds` to generate the SAME prompt once per seed.
+    seeds = config.get("seeds")
+    if seeds is None:
+        single_seed = config.get("seed")
+        seeds = [single_seed] if single_seed is not None else [None]
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -578,29 +578,38 @@ def generate_on_gpu(
     for prompt, global_idx in zip(prompts, global_indices):
         print(f"[GPU {gpu_id}] Prompt {global_idx}: {prompt[:60]}...")
 
-        output = pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            height=height,
-            width=width,
-            num_inference_steps=num_steps,
-            guidance_scale=guidance_scale,
-            num_images_per_prompt=num_images_per_prompt,
-            generator=generator,
-            rke_guided_sampler=rke_sampler,
-            criteria="vscore_clip",
-            criteria_guidance_scale=criteria_guidance_scale,
-            guidance_freq=guidance_freq,
-            clip_for_guidance=clip_wrapper,
-        )
+        for seed in seeds:
+            generator = (
+                torch.Generator(device=device).manual_seed(seed)
+                if seed is not None else None
+            )
 
-        for img_idx, img in enumerate(output.images):
-            # Filename uses ORIGINAL global index from the undivided prompt list
-            # Format: 1.png, 2.png, 3.png, ... (1-indexed to match your existing workflow)
-            filename = f"{global_idx + 1}.png"
-            filepath = os.path.join(output_dir, filename)
-            img.save(filepath)
-            print(f"[GPU {gpu_id}] Saved {filepath}")
+            output = pipe(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                height=height,
+                width=width,
+                num_inference_steps=num_steps,
+                guidance_scale=guidance_scale,
+                num_images_per_prompt=num_images_per_prompt,
+                generator=generator,
+                rke_guided_sampler=rke_sampler,
+                criteria="vscore_clip",
+                criteria_guidance_scale=criteria_guidance_scale,
+                guidance_freq=guidance_freq,
+                clip_for_guidance=clip_wrapper,
+            )
+
+            for img_idx, img in enumerate(output.images):
+                # Filename uses ORIGINAL global index + seed, so each seed
+                # variant of the same prompt gets its own file.
+                # Format: 1_seed42.png, 1_seed123.png, ... (1-indexed)
+                seed_tag = f"seed{seed}" if seed is not None else "randseed"
+                suffix = f"_{img_idx}" if num_images_per_prompt > 1 else ""
+                filename = f"{global_idx + 1}_{seed_tag}{suffix}.png"
+                filepath = os.path.join(output_dir, filename)
+                img.save(filepath)
+                print(f"[GPU {gpu_id}] Saved {filepath}")
 
     print(f"[GPU {gpu_id}] Done! Generated {len(prompts)} images.")
 

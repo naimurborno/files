@@ -18,8 +18,9 @@ guidance_scale: 4
 num_images_per_prompt: 1
 negative_prompt: ""
 
-# Seed (set to null for random)
-seed: 42
+# Seeds: list of seeds to generate for EACH prompt (same prompt, different seeds)
+# e.g. seeds: [42, 123, 777]  -> 3 images per prompt, one per seed
+seeds: [41, 42, 43, 44, 45]
 
 # Data type: "float16" or "float32"
 dtype: "float16"
