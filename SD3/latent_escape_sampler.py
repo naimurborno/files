@@ -176,7 +176,7 @@ class UGILESampler:
             xi_low = F.conv2d(xi, kernel, padding=5, groups=C)
             
             # 60% low-freq (pose) + 40% high-freq (natural texture diversity)
-            xi = 0.70 * xi_low + 0.30 * xi
+            xi = 0.65 * xi_low + 0.35 * xi
 
         # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
         xi_flat = xi.flatten()
