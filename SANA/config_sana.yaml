@@ -83,7 +83,7 @@ ugile:
   sigma_lo:            -1.0
   sigma_hi:            1.0
   escape_scale:        1.0
-  theta_max:           0.7
+  theta_max:           0.8
   walk_steps:          10
   branch_noise:        0.7
   J:                   1
