@@ -84,7 +84,7 @@ ugile:
   sigma_lo:            -1.0   # which cached steps to use
   sigma_hi:            1.0
   escape_scale:        1.0    # how far to push x_0 along escape direction
-  theta_max:           0.7  # max geodesic angle
+  theta_max:           0.8  # max geodesic angle
   walk_steps:          10     # split into 10 small steps of 0.06 rad each
   branch_noise:        0.7    # lateral offset for inter-branch diversity
   J:                   1      # number of diverse images per seed
