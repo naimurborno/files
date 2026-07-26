@@ -354,12 +354,13 @@ def create_mode_discovery_figure(
 
     # Caption - using normal string (not raw) to avoid backslash issues
     caption = (
-        "\\textbf{Figure 3.} Comparison of mode discovery. "
-        "$(b)$ Standard initialization (black "x") concentrates samples in the high-potential region (dark red) "
-        "driven by dominant modes, leading to $(d)$ mode collapse where only "
-        f"{n_baseline_modes} modes are recovered. "
-        "$(c)$ Our proposed UGILE initialization ($x_T^*$, green "o") disperses samples across the landscape, "
-        f"successfully recovering $(e)$ all {n_ugile_modes} modes."
+        "this is caption"
+        # "\\textbf{Figure 3.} Comparison of mode discovery. "
+        # "$(b)$ Standard initialization (black "x") concentrates samples in the high-potential region (dark red) "
+        # "driven by dominant modes, leading to $(d)$ mode collapse where only "
+        # f"{n_baseline_modes} modes are recovered. "
+        # "$(c)$ Our proposed UGILE initialization ($x_T^*$, green "o") disperses samples across the landscape, "
+        # f"successfully recovering $(e)$ all {n_ugile_modes} modes."
     )
 
     fig.text(0.5, 0.01, caption, ha="center", va="bottom", fontsize=9, wrap=True)
