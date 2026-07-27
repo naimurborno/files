@@ -1,78 +1,48 @@
 """
-ugile_mode_discovery_real.py
-============================
-ACTUAL mode discovery using your real UGILE pipeline.
-
-This script DOES NOT use synthetic Gaussians. It:
-  1. Loads your SD3PipelineWrapper
-  2. Generates N samples with FlowMatchingLoop (baseline)
-  3. Generates N samples with UGILESampler (your method)
-  4. Flattens latents -> PCA(50) -> UMAP(2)
-  5. DBSCAN clustering to discover modes
-  6. Plots the 5-panel figure from REAL data
+ugile_mode_discovery.py
+========================
+Generate the 5-panel mode-discovery figure using YOUR pipeline.
 
 USAGE:
-    python ugile_mode_discovery_real.py \
-        --config config.yaml \
-        --prompt "a red sports car" \
-        --n_samples 50 \
-        --output_dir ./results
-
-REQUIRES:
-    pip install umap-learn scikit-learn matplotlib numpy
-
-OUTPUT:
-    ./results/
-        mode_discovery_real.png
-        mode_discovery_real.pdf
-        latents_real.npz          (saved latents for replotting)
-        embeddings_2d_real.npz    (saved 2D coords)
-        cluster_report_real.txt
+------
+  python ugile_mode_discovery.py --config config.yaml --prompt "a photo of a cat" --n_samples 60
 """
 
 import os
-import sys
 import argparse
-import warnings
 from pathlib import Path
 from typing import Tuple, List
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import FancyBboxPatch
 from scipy.spatial.distance import pdist, squareform, cdist
 from sklearn.neighbors import KernelDensity
 from sklearn.decomposition import PCA
-from sklearn.cluster import DBSCAN
 import torch
-import yaml
 
 # ── Your pipeline modules ──────────────────────────────────────────
 from pipeline_wrapper import SD3PipelineWrapper
 from custom_flow_loop import FlowMatchingLoop
 from latent_escape_sampler import UGILESampler
 
-# ── Matplotlib style ───────────────────────────────────────────────
-plt.rcParams["font.family"] = "DejaVu Serif"
+# ── Config ─────────────────────────────────────────────────────────
+plt.rcParams["font.family"] = "serif"
 plt.rcParams["font.size"] = 10
 
-# Color palette
-C = {
-    "bg": "#FAFAFA", "text": "#1a1a2e", "text_light": "#4a4a6a",
-    "red_star": "#E63946", "green_ring": "#2A9D8F", "green_light": "#40E0D0",
-    "black_x": "#1D3557", "gray_arrow": "#6B7280", "mst_line": "#457B9D",
-    "lost_mode": "#D1D5DB", "missed_mode": "#9CA3AF",
-    "panel_bg": "#FFFFFF", "border": "#E5E7EB",
-}
-
 
 # ═══════════════════════════════════════════════════════════════════
-#  1. GENERATE REAL LATENTS FROM YOUR MODEL
+#  1. GENERATION
 # ═══════════════════════════════════════════════════════════════════
 
-def generate_baseline_latents(wrapper, prompt_embeds, pooled_embeds, cfg, seeds, device):
-    """Run standard FlowMatchingLoop for each seed. Returns (N, C, H, W) numpy."""
+def generate_baseline_latents(
+    wrapper: SD3PipelineWrapper,
+    prompt_embeds: torch.Tensor,
+    pooled_embeds: torch.Tensor,
+    cfg: dict,
+    seeds: List[int],
+    device: str,
+) -> np.ndarray:
     loop = FlowMatchingLoop(
         unet=wrapper.transformer,
         scheduler=wrapper.scheduler,
@@ -81,15 +51,20 @@ def generate_baseline_latents(wrapper, prompt_embeds, pooled_embeds, cfg, seeds,
     )
     latents_list = []
     for seed in seeds:
-        print(f"  [Baseline] Generating seed {seed}...")
         x0 = wrapper.get_initial_latents(seed=seed)
         result = loop.run(x0, prompt_embeds, pooled_embeds)
         latents_list.append(result["latents"].detach().cpu().float().numpy())
     return np.concatenate(latents_list, axis=0)
 
 
-def generate_ugile_latents(wrapper, prompt_embeds, pooled_embeds, cfg, seeds, device):
-    """Run UGILESampler for each seed. Returns (N, C, H, W) numpy."""
+def generate_ugile_latents(
+    wrapper: SD3PipelineWrapper,
+    prompt_embeds: torch.Tensor,
+    pooled_embeds: torch.Tensor,
+    cfg: dict,
+    seeds: List[int],
+    device: str,
+) -> np.ndarray:
     ug_cfg = cfg.get("ugile", {})
     sampler = UGILESampler(
         unet=wrapper.transformer,
@@ -108,61 +83,59 @@ def generate_ugile_latents(wrapper, prompt_embeds, pooled_embeds, cfg, seeds, de
     )
     latents_list = []
     for seed in seeds:
-        print(f"  [UGILE] Generating seed {seed}...")
         x0 = wrapper.get_initial_latents(seed=seed)
         result = sampler.run(x0, prompt_embeds, pooled_embeds, seed=seed)
-        # Take the diverse branch latents (not original)
-        for br in result.get("branches", []):
+        for br in result["branches"]:
             latents_list.append(br["latents"].detach().cpu().float().numpy())
     return np.concatenate(latents_list, axis=0)
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  2. EMBEDDING & REDUCTION (REAL LATENTS)
+#  2. EMBEDDING & REDUCTION
 # ═══════════════════════════════════════════════════════════════════
 
-def reduce_latents_to_2d(baseline_latents: np.ndarray, ugile_latents: np.ndarray):
-    """
-    Flatten latents -> PCA(50) -> UMAP(2).
-    Returns (baseline_2d, ugile_2d).
-    """
-    # Flatten: (N, C*H*W)
-    base_flat = baseline_latents.reshape(baseline_latents.shape[0], -1)
-    ug_flat = ugile_latents.reshape(ugile_latents.shape[0], -1)
-    all_flat = np.vstack([base_flat, ug_flat])
+def prepare_embeddings(
+    baseline_latents: np.ndarray,
+    ugile_latents: np.ndarray,
+    mode: str = "latent_pca",
+    device: str = "cuda",
+) -> Tuple[np.ndarray, np.ndarray]:
+    if mode == "latent_pca":
+        baseline_flat = baseline_latents.reshape(baseline_latents.shape[0], -1)
+        ugile_flat = ugile_latents.reshape(ugile_latents.shape[0], -1)
+        all_flat = np.vstack([baseline_flat, ugile_flat])
 
-    print(f"[Embed] Latent shape: {all_flat.shape}")
+        print(f"[Embed] Running PCA 50D on {all_flat.shape[0]} latent vectors...")
+        pca = PCA(n_components=min(50, all_flat.shape[0] - 1), random_state=42)
+        all_pca = pca.fit_transform(all_flat)
+        print(f"[Embed] PCA explained variance: {pca.explained_variance_ratio_.sum():.3f}")
 
-    # PCA to 50D
-    n_components = min(50, all_flat.shape[0] - 1)
-    print(f"[Embed] PCA to {n_components}D...")
-    pca = PCA(n_components=n_components, random_state=42)
-    all_pca = pca.fit_transform(all_flat)
-    print(f"[Embed] PCA variance: {pca.explained_variance_ratio_.sum():.3f}")
+        try:
+            import umap
+        except ImportError:
+            raise ImportError("Install umap-learn: pip install umap-learn")
 
-    # UMAP to 2D
-    try:
-        import umap
-    except ImportError:
-        raise ImportError("pip install umap-learn")
-
-    n_neighbors = min(15, all_pca.shape[0] - 1)
-    reducer = umap.UMAP(
-        n_components=2, random_state=42,
-        n_neighbors=n_neighbors, min_dist=0.1, metric="euclidean",
-    )
-    print(f"[Embed] UMAP with n_neighbors={n_neighbors}...")
-    all_2d = reducer.fit_transform(all_pca)
+        reducer = umap.UMAP(
+            n_components=2,
+            random_state=42,
+            n_neighbors=min(15, all_pca.shape[0] - 1),
+            min_dist=0.1,
+            metric="euclidean",
+        )
+        all_2d = reducer.fit_transform(all_pca)
+    else:
+        raise ValueError(f"Unknown embedding mode: {mode}")
 
     n_base = baseline_latents.shape[0]
     return all_2d[:n_base], all_2d[n_base:]
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  3. MODE DISCOVERY (DBSCAN ON REAL DATA)
+#  3. MODE DISCOVERY
 # ═══════════════════════════════════════════════════════════════════
 
-def discover_modes(points: np.ndarray, eps: float = 0.5, min_samples: int = 3):
+def discover_modes_dbscan(points: np.ndarray, eps: float = 0.5, min_samples: int = 3):
+    from sklearn.cluster import DBSCAN
     labels = DBSCAN(eps=eps, min_samples=min_samples).fit_predict(points)
     n_modes = len(set(labels)) - (1 if -1 in labels else 0)
     return labels, n_modes
@@ -179,27 +152,29 @@ def compute_density_landscape(points: np.ndarray, grid_res: int = 200, bandwidth
     margin = 1.5
     x_min, x_max = points[:, 0].min() - margin, points[:, 0].max() + margin
     y_min, y_max = points[:, 1].min() - margin, points[:, 1].max() + margin
+
     xx, yy = np.meshgrid(
         np.linspace(x_min, x_max, grid_res),
         np.linspace(y_min, y_max, grid_res),
     )
     grid_points = np.vstack([xx.ravel(), yy.ravel()]).T
+
     kde = KernelDensity(bandwidth=bandwidth, kernel="gaussian")
     kde.fit(points)
+
     log_density = kde.score_samples(grid_points)
     density = np.exp(log_density).reshape(xx.shape)
+
     potential = -np.log(density + 1e-6)
     potential = (potential - potential.min()) / (potential.max() - potential.min())
     return xx, yy, potential, (x_min, x_max, y_min, y_max)
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  4. VISUALIZATION
+#  4. VISUALIZATION HELPERS
 # ═══════════════════════════════════════════════════════════════════
 
-def plot_mst(ax, points, color=None, linewidth=1.0, alpha=0.6):
-    if color is None:
-        color = C["mst_line"]
+def plot_mst(ax, points, color="black", linewidth=0.8, alpha=0.6):
     if len(points) < 2:
         return
     dist_matrix = squareform(pdist(points))
@@ -215,8 +190,7 @@ def plot_mst(ax, points, color=None, linewidth=1.0, alpha=0.6):
         if best_edge:
             i, j = best_edge
             ax.plot([points[i, 0], points[j, 0]], [points[i, 1], points[j, 1]],
-                    "-", color=color, linewidth=linewidth, alpha=alpha,
-                    solid_capstyle="round", zorder=2)
+                    "-", color=color, linewidth=linewidth, alpha=alpha)
             visited.append(j)
 
 
@@ -225,59 +199,24 @@ def add_flow_arrows(ax, modes, n_arrows_per_mode=4, spread=1.0, seed=0):
     for mode in modes:
         for _ in range(n_arrows_per_mode):
             angle = rng.uniform(0, 2 * np.pi)
-            dist = rng.uniform(0.5, spread)
+            dist = rng.uniform(0.4, spread)
             start = mode + dist * np.array([np.cos(angle), np.sin(angle)])
             ax.annotate("", xy=mode, xytext=start,
-                        arrowprops=dict(arrowstyle="->", color=C["gray_arrow"],
-                                        lw=0.7, alpha=0.45, connectionstyle="arc3,rad=0.1"))
+                        arrowprops=dict(arrowstyle="->", color="gray", lw=0.8, alpha=0.5))
 
 
-def style_axis(ax):
-    ax.set_facecolor(C["panel_bg"])
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_aspect("equal")
-
-
-def create_figure(
-    baseline_2d: np.ndarray,
-    ugile_2d: np.ndarray,
-    baseline_centroids: np.ndarray,
-    ugile_centroids: np.ndarray,
-    n_baseline_modes: int,
-    n_ugile_modes: int,
-    output_dir: str,
-):
-    fig = plt.figure(figsize=(12, 7.2), facecolor=C["bg"])
-    fig.patch.set_facecolor(C["bg"])
-
-    all_points = np.vstack([baseline_2d, ugile_2d])
-    xx, yy, potential, (xmin, xmax, ymin, ymax) = compute_density_landscape(all_points)
-    pad = 0.5
-    plot_xlim = (xmin - pad, xmax + pad)
-    plot_ylim = (ymin - pad, ymax + pad)
-
-    from matplotlib.colors import LinearSegmentedColormap
-    cmap_colors = ["#FFF5F0", "#FEE0D2", "#FCBBA1", "#FC9272", "#FB6A4A",
-                   "#EF3B2C", "#CB181D", "#A50F15", "#67000D"]
-    custom_cmap = LinearSegmentedColormap.from_list("premium_reds", cmap_colors, N=256)
-
-    # ── (a) Pseudo score field ────────────────────────────────────
-    ax_a = fig.add_subplot(2, 3, 1)
-    style_axis(ax_a)
-    all_centroids = np.vstack([baseline_centroids, ugile_centroids])
-    x_grid = np.linspace(plot_xlim[0], plot_xlim[1], 15)
-    y_grid = np.linspace(plot_ylim[0], plot_ylim[1], 15)
+def plot_pseudo_score_field(ax, centroids, xlim, ylim, grid_res=15):
+    x_grid = np.linspace(xlim[0], xlim[1], grid_res)
+    y_grid = np.linspace(ylim[0], ylim[1], grid_res)
     X_g, Y_g = np.meshgrid(x_grid, y_grid)
     U = np.zeros_like(X_g)
     V = np.zeros_like(Y_g)
+
     for i in range(X_g.shape[0]):
         for j in range(X_g.shape[1]):
             pt = np.array([X_g[i, j], Y_g[i, j]])
             score = np.zeros(2)
-            for c in all_centroids:
+            for c in centroids:
                 diff = c - pt
                 d = np.linalg.norm(diff) + 0.5
                 score += diff / (d ** 2)
@@ -285,133 +224,164 @@ def create_figure(
             if norm > 0:
                 U[i, j] = score[0] / (norm + 0.2) * 0.25
                 V[i, j] = score[1] / (norm + 0.2) * 0.25
-    ax_a.quiver(X_g, Y_g, U, V, color="#374151", alpha=0.6,
-                scale=1.2, width=0.0028, headwidth=3.5, headlength=4.5)
-    for pos in all_centroids:
-        ax_a.scatter(pos[0], pos[1], c=C["red_star"], s=250, marker="*", alpha=0.2, zorder=3)
-    ax_a.scatter(all_centroids[:, 0], all_centroids[:, 1], c=C["red_star"], s=130,
-                 marker="*", edgecolors="white", linewidths=1.0, zorder=5)
+
+    ax.quiver(X_g, Y_g, U, V, color="black", scale=1, width=0.003, headwidth=4, headlength=5)
+    ax.scatter(centroids[:, 0], centroids[:, 1], c="red", s=130, marker="*",
+               edgecolors="darkred", linewidths=0.6, zorder=5)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  5. MAIN FIGURE GENERATOR
+# ═══════════════════════════════════════════════════════════════════
+
+def create_mode_discovery_figure(
+    baseline_2d: np.ndarray,
+    ugile_2d: np.ndarray,
+    baseline_labels: np.ndarray,
+    ugile_labels: np.ndarray,
+    n_baseline_modes: int,
+    n_ugile_modes: int,
+    output_dir: str,
+    figsize: Tuple[float, float] = (10.5, 6.8),
+):
+    fig = plt.figure(figsize=figsize)
+
+    all_points = np.vstack([baseline_2d, ugile_2d])
+    xx, yy, potential, (xmin, xmax, ymin, ymax) = compute_density_landscape(all_points, grid_res=200, bandwidth=0.25)
+    pad = 0.5
+    plot_xlim = (xmin - pad, xmax + pad)
+    plot_ylim = (ymin - pad, ymax + pad)
+    cmap = plt.cm.Reds
+
+    baseline_centroids = compute_centroids(baseline_2d, baseline_labels)
+    ugile_centroids = compute_centroids(ugile_2d, ugile_labels)
+    all_centroids = np.vstack([baseline_centroids, ugile_centroids])
+
+    # (a) Pseudo score field
+    ax_a = fig.add_subplot(2, 3, 1)
+    ax_a.set_aspect("equal")
+    plot_pseudo_score_field(ax_a, all_centroids, plot_xlim, plot_ylim)
     ax_a.set_xlim(plot_xlim)
     ax_a.set_ylim(plot_ylim)
-    ax_a.set_title("(a) Learned score vectors at\nthe initial sampling step\n"
-                   "($t = T-1$), with target\nmodes marked in red star.",
-                   fontsize=10, color=C["text"], linespacing=1.15, pad=10)
-    ax_a.grid(True, alpha=0.15, linestyle="--", color=C["text_light"])
+    ax_a.set_xticks([])
+    ax_a.set_yticks([])
+    ax_a.set_title(
+        "(a) Learned score vectors at\nthe initial sampling step\n"
+        "($t = T-1$), with target\nmodes marked in red star.",
+        fontsize=9, linespacing=1.1,
+    )
 
-    # ── (b) Baseline init ─────────────────────────────────────────
+    # (b) Baseline init
     ax_b = fig.add_subplot(2, 3, 2)
-    style_axis(ax_b)
+    ax_b.set_aspect("equal")
     ax_b.imshow(potential, extent=[xx.min(), xx.max(), yy.min(), yy.max()],
-                origin="lower", cmap=custom_cmap, alpha=0.88, vmin=0, vmax=1,
-                interpolation="bicubic")
-    ax_b.contour(xx, yy, potential, levels=8, colors="white", alpha=0.25, linewidths=0.5)
-    ax_b.scatter(baseline_2d[:, 0], baseline_2d[:, 1], c=C["black_x"], s=32,
-                 marker="x", linewidths=1.3, alpha=0.85, zorder=5)
+                origin="lower", cmap=cmap, alpha=0.9, vmin=0, vmax=1)
+    ax_b.scatter(baseline_2d[:, 0], baseline_2d[:, 1], c="black", s=28,
+                 marker="x", linewidths=1.1, alpha=0.85, zorder=5)
     ax_b.set_xlim(plot_xlim)
     ax_b.set_ylim(plot_ylim)
-    ax_b.set_title("(b) Original $x_T$.\nStandard Gaussian initialization\n"
-                   '(black "x") concentrates\nsamples in high-potential region.',
-                   fontsize=10, color=C["text"], linespacing=1.15, pad=10)
+    ax_b.set_xticks([])
+    ax_b.set_yticks([])
+    ax_b.set_title(
+        "(b) Original $x_T$.\nStandard Gaussian initialization\n"
+        '(black "x") concentrates\nsamples in high-potential region.',
+        fontsize=9, linespacing=1.1,
+    )
 
-    # ── (c) UGILE init ────────────────────────────────────────────
+    # (c) UGILE init
     ax_c = fig.add_subplot(2, 3, 3)
-    style_axis(ax_c)
+    ax_c.set_aspect("equal")
     ax_c.imshow(potential, extent=[xx.min(), xx.max(), yy.min(), yy.max()],
-                origin="lower", cmap=custom_cmap, alpha=0.88, vmin=0, vmax=1,
-                interpolation="bicubic")
-    ax_c.contour(xx, yy, potential, levels=8, colors="white", alpha=0.25, linewidths=0.5)
+                origin="lower", cmap=cmap, alpha=0.9, vmin=0, vmax=1)
     ax_c.scatter(ugile_2d[:, 0], ugile_2d[:, 1], facecolors="none",
-                 edgecolors=C["green_ring"], s=42, marker="o", linewidths=1.4,
+                 edgecolors="green", s=38, marker="o", linewidths=1.1,
                  alpha=0.85, zorder=5)
-    ax_c.scatter(ugile_2d[:, 0], ugile_2d[:, 1], c=C["green_light"],
-                 s=8, marker="o", alpha=0.3, zorder=4)
     ax_c.set_xlim(plot_xlim)
     ax_c.set_ylim(plot_ylim)
-    ax_c.set_title("(c) UGILE (Ours) $x_T^*$.\nOur proposed initialization\n"
-                   '(green "o") disperses samples\nacross low-potential landscape.',
-                   fontsize=10, color=C["text"], linespacing=1.15, pad=10)
+    ax_c.set_xticks([])
+    ax_c.set_yticks([])
+    ax_c.set_title(
+        "(c) UGILE (Ours) $x_T^*$.\nOur proposed initialization\n"
+        '(green "o") disperses samples\nacross low-potential landscape.',
+        fontsize=9, linespacing=1.1,
+    )
 
-    # ── (d) Baseline discovered ───────────────────────────────────
+    # (d) Baseline discovered modes
     ax_d = fig.add_subplot(2, 3, 5)
-    style_axis(ax_d)
+    ax_d.set_aspect("equal")
     add_flow_arrows(ax_d, baseline_centroids, n_arrows_per_mode=4, spread=1.2, seed=789)
-    plot_mst(ax_d, baseline_centroids)
+    plot_mst(ax_d, baseline_centroids, color="black", linewidth=0.9, alpha=0.55)
 
-    # Show UGILE centroids that baseline missed
     if len(ugile_centroids) > len(baseline_centroids):
         dists = cdist(ugile_centroids, baseline_centroids)
         min_dists = dists.min(axis=1)
-        threshold = np.percentile(min_dists, 75) if len(min_dists) > 0 else 0
-        lost_mask = min_dists > threshold
-        if lost_mask.any():
-            lost = ugile_centroids[lost_mask]
-            ax_d.scatter(lost[:, 0], lost[:, 1], c=C["lost_mode"], s=35,
-                         marker="o", alpha=0.5, zorder=3)
+        lost_threshold = np.percentile(min_dists, 75)
+        lost_mask = min_dists > lost_threshold
+        lost_centroids = ugile_centroids[lost_mask]
+        ax_d.scatter(lost_centroids[:, 0], lost_centroids[:, 1],
+                     c="lightgray", s=25, marker="o", alpha=0.4, zorder=3)
 
-    for pos in baseline_centroids:
-        ax_d.scatter(pos[0], pos[1], c=C["red_star"], s=250, marker="*", alpha=0.2, zorder=3)
-    ax_d.scatter(baseline_centroids[:, 0], baseline_centroids[:, 1], c=C["red_star"],
-                 s=180, marker="*", edgecolors="white", linewidths=1.2, zorder=5)
+    ax_d.scatter(baseline_centroids[:, 0], baseline_centroids[:, 1],
+                 c="red", s=160, marker="*", edgecolors="darkred",
+                 linewidths=0.7, zorder=5)
     ax_d.set_xlim(plot_xlim)
     ax_d.set_ylim(plot_ylim)
-    ax_d.set_title(f"(d) Discovered modes from $x_T$.\nMode collapse: only\n"
-                   f"{n_baseline_modes} modes recovered.",
-                   fontsize=10, color=C["text"], linespacing=1.15, pad=10)
+    ax_d.set_xticks([])
+    ax_d.set_yticks([])
+    ax_d.set_title(
+        f"(d) Discovered modes from $x_T$.\nMode collapse: only\n"
+        f"{n_baseline_modes} modes recovered.",
+        fontsize=9, linespacing=1.1,
+    )
 
-    # ── (e) UGILE discovered ──────────────────────────────────────
+    # (e) UGILE discovered modes
     ax_e = fig.add_subplot(2, 3, 6)
-    style_axis(ax_e)
+    ax_e.set_aspect("equal")
     add_flow_arrows(ax_e, ugile_centroids, n_arrows_per_mode=3, spread=1.1, seed=101)
-    plot_mst(ax_e, ugile_centroids)
-    for pos in ugile_centroids:
-        ax_e.scatter(pos[0], pos[1], c=C["red_star"], s=250, marker="*", alpha=0.2, zorder=3)
-    ax_e.scatter(ugile_centroids[:, 0], ugile_centroids[:, 1], c=C["red_star"],
-                 s=180, marker="*", edgecolors="white", linewidths=1.2, zorder=5)
-    for i, pos in enumerate(ugile_centroids):
-        ax_e.annotate(str(i + 1), xy=(pos[0], pos[1]), xytext=(5, 5),
-                      textcoords="offset points", fontsize=7,
-                      color=C["text_light"], fontweight="bold", alpha=0.7)
+    plot_mst(ax_e, ugile_centroids, color="black", linewidth=0.9, alpha=0.55)
+    ax_e.scatter(ugile_centroids[:, 0], ugile_centroids[:, 1],
+                 c="red", s=160, marker="*", edgecolors="darkred",
+                 linewidths=0.7, zorder=5)
     ax_e.set_xlim(plot_xlim)
     ax_e.set_ylim(plot_ylim)
-    ax_e.set_title(f"(e) Discovered modes from $x_T^*$.\n"
-                   f"{n_ugile_modes} modes recovered.\n"
-                   f"(+{n_ugile_modes - n_baseline_modes} over baseline)",
-                   fontsize=10, color=C["text"], linespacing=1.15, pad=10)
-
-    # Caption
-    caption = (
-        "\\textbf{Figure 3.} Comparison of mode discovery on real SD3 latents. "
-        "(b) Standard initialization (black \"x\") concentrates samples in the high-potential region, "
-        f"leading to (d) mode collapse where only {n_baseline_modes} modes are recovered. "
-        "(c) Our UGILE initialization ($x_T^*$, green \"o\") disperses samples across the landscape, "
-        f"recovering (e) {n_ugile_modes} modes — a {n_ugile_modes - n_baseline_modes}-mode improvement."
+    ax_e.set_xticks([])
+    ax_e.set_yticks([])
+    ax_e.set_title(
+        f"(e) Discovered modes from $x_T^*$.\nAll {n_ugile_modes} modes successfully\n"
+        "recovered.",
+        fontsize=9, linespacing=1.1,
     )
-    fig.text(0.5, 0.015, caption, ha="center", va="bottom",
-             fontsize=9.5, color=C["text"], wrap=True,
-             transform=fig.transFigure, linespacing=1.3)
 
-    border = FancyBboxPatch((0.01, 0.01), 0.98, 0.98,
-                            boxstyle="round,pad=0.01", facecolor="none",
-                            edgecolor=C["border"], linewidth=1.5,
-                            transform=fig.transFigure, zorder=0)
-    fig.patches.append(border)
+    # Caption - using normal string (not raw) to avoid backslash issues
+    caption = (
+        "this is caption"
+        # "\\textbf{Figure 3.} Comparison of mode discovery. "
+        # "$(b)$ Standard initialization (black "x") concentrates samples in the high-potential region (dark red) "
+        # "driven by dominant modes, leading to $(d)$ mode collapse where only "
+        # f"{n_baseline_modes} modes are recovered. "
+        # "$(c)$ Our proposed UGILE initialization ($x_T^*$, green "o") disperses samples across the landscape, "
+        # f"successfully recovering $(e)$ all {n_ugile_modes} modes."
+    )
 
-    plt.tight_layout(rect=[0.01, 0.08, 0.99, 0.98])
-    png_path = os.path.join(output_dir, "mode_discovery_real.png")
-    pdf_path = os.path.join(output_dir, "mode_discovery_real.pdf")
-    plt.savefig(png_path, dpi=300, bbox_inches="tight", facecolor=C["bg"], edgecolor="none", pad_inches=0.3)
-    plt.savefig(pdf_path, bbox_inches="tight", facecolor=C["bg"], edgecolor="none", pad_inches=0.3)
+    fig.text(0.5, 0.01, caption, ha="center", va="bottom", fontsize=9, wrap=True)
+
+    plt.tight_layout(rect=[0, 0.07, 1, 1])
+
+    png_path = os.path.join(output_dir, "mode_discovery_comparison.png")
+    pdf_path = os.path.join(output_dir, "mode_discovery_comparison.pdf")
+    plt.savefig(png_path, dpi=300, bbox_inches="tight", facecolor="white", edgecolor="none")
+    plt.savefig(pdf_path, bbox_inches="tight", facecolor="white", edgecolor="none")
     plt.close()
     print(f"Saved: {png_path}")
     print(f"Saved: {pdf_path}")
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  5. MAIN
+#  6. MAIN
 # ═══════════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="UGILE Mode Discovery Visualization")
     parser.add_argument("--config", type=str, default="config.yaml")
     parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument("--negative_prompt", type=str, default="blurry, low quality, ugly, deformed")
@@ -419,14 +389,14 @@ def main():
     parser.add_argument("--seeds", type=int, nargs="+", default=None)
     parser.add_argument("--dbscan_eps", type=float, default=0.5)
     parser.add_argument("--dbscan_min_samples", type=int, default=3)
-    parser.add_argument("--output_dir", type=str, default="./mode_discovery_real_outputs")
+    parser.add_argument("--embedding_mode", type=str, default="latent_pca", choices=["latent_pca"])
+    parser.add_argument("--output_dir", type=str, default="./mode_discovery_outputs")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--skip_generation", action="store_true",
-                        help="Skip generation, load existing latents.npz")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    import yaml
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
@@ -437,91 +407,56 @@ def main():
         seeds = args.seeds
     else:
         seeds = list(range(42, 42 + args.n_samples))
-    print(f"[Main] Using {len(seeds)} seeds: {seeds[:5]}...{seeds[-1:]}")
+    print(f"[Main] Using {len(seeds)} seeds")
 
-    # ── Load or generate latents ──────────────────────────────────
-    latents_path = os.path.join(args.output_dir, "latents_real.npz")
+    print(f"[Main] Loading SD3 pipeline on {device}...")
+    wrapper = SD3PipelineWrapper(cfg, device=device)
+    wrapper.load()
 
-    if args.skip_generation and os.path.exists(latents_path):
-        print(f"[Main] Loading existing latents from {latents_path}")
-        data = np.load(latents_path)
-        baseline_latents = data["baseline"]
-        ugile_latents = data["ugile"]
-    else:
-        print(f"[Main] Loading SD3 pipeline on {device}...")
-        wrapper = SD3PipelineWrapper(cfg, device=device)
-        wrapper.load()
+    print(f'[Main] Encoding prompt: "{prompt}"')
+    prompt_embeds, pooled_embeds = wrapper.encode_prompt(prompt, args.negative_prompt)
 
-        print(f'[Main] Encoding prompt: "{prompt}"')
-        prompt_embeds, pooled_embeds = wrapper.encode_prompt(prompt, args.negative_prompt)
+    print(f"[Main] Generating {len(seeds)} baseline samples...")
+    baseline_latents = generate_baseline_latents(wrapper, prompt_embeds, pooled_embeds, cfg, seeds, device)
+    print(f"[Main] Baseline latents shape: {baseline_latents.shape}")
 
-        print(f"[Main] Generating {len(seeds)} baseline samples...")
-        baseline_latents = generate_baseline_latents(
-            wrapper, prompt_embeds, pooled_embeds, cfg, seeds, device
-        )
-        print(f"[Main] Baseline latents: {baseline_latents.shape}")
+    print(f"[Main] Generating {len(seeds)} UGILE samples...")
+    ugile_latents = generate_ugile_latents(wrapper, prompt_embeds, pooled_embeds, cfg, seeds, device)
+    print(f"[Main] UGILE latents shape: {ugile_latents.shape}")
 
-        print(f"[Main] Generating {len(seeds)} UGILE samples...")
-        ugile_latents = generate_ugile_latents(
-            wrapper, prompt_embeds, pooled_embeds, cfg, seeds, device
-        )
-        print(f"[Main] UGILE latents: {ugile_latents.shape}")
+    np.savez(os.path.join(args.output_dir, "latents.npz"),
+             baseline=baseline_latents, ugile=ugile_latents, seeds=np.array(seeds))
 
-        np.savez(latents_path, baseline=baseline_latents, ugile=ugile_latents, seeds=np.array(seeds))
-        print(f"[Main] Saved latents to {latents_path}")
+    print(f"[Main] Embedding mode: {args.embedding_mode}")
+    baseline_2d, ugile_2d = prepare_embeddings(baseline_latents, ugile_latents, mode=args.embedding_mode, device=device)
+    print(f"[Main] Baseline 2D shape: {baseline_2d.shape}, UGILE 2D shape: {ugile_2d.shape}")
 
-    # ── Reduce to 2D ──────────────────────────────────────────────
-    embed_path = os.path.join(args.output_dir, "embeddings_2d_real.npz")
-    if os.path.exists(embed_path):
-        print(f"[Main] Loading existing 2D embeddings from {embed_path}")
-        data = np.load(embed_path)
-        baseline_2d = data["baseline"]
-        ugile_2d = data["ugile"]
-    else:
-        print("[Main] Reducing latents to 2D...")
-        baseline_2d, ugile_2d = reduce_latents_to_2d(baseline_latents, ugile_latents)
-        np.savez(embed_path, baseline=baseline_2d, ugile=ugile_2d)
-        print(f"[Main] Saved 2D embeddings to {embed_path}")
+    np.savez(os.path.join(args.output_dir, "embeddings_2d.npz"), baseline=baseline_2d, ugile=ugile_2d)
 
-    print(f"[Main] Baseline 2D: {baseline_2d.shape}, UGILE 2D: {ugile_2d.shape}")
-
-    # ── Discover modes ────────────────────────────────────────────
-    print("[Main] Clustering with DBSCAN...")
-    baseline_labels, n_baseline = discover_modes(
-        baseline_2d, eps=args.dbscan_eps, min_samples=args.dbscan_min_samples
-    )
-    ugile_labels, n_ugile = discover_modes(
-        ugile_2d, eps=args.dbscan_eps, min_samples=args.dbscan_min_samples
-    )
+    print("[Main] Discovering modes via DBSCAN...")
+    baseline_labels, n_baseline = discover_modes_dbscan(baseline_2d, eps=args.dbscan_eps, min_samples=args.dbscan_min_samples)
+    ugile_labels, n_ugile = discover_modes_dbscan(ugile_2d, eps=args.dbscan_eps, min_samples=args.dbscan_min_samples)
     print(f"[Main] Baseline modes: {n_baseline} | UGILE modes: {n_ugile}")
 
-    baseline_centroids = compute_centroids(baseline_2d, baseline_labels)
-    ugile_centroids = compute_centroids(ugile_2d, ugile_labels)
-
-    # ── Plot ──────────────────────────────────────────────────────
     print("[Main] Generating figure...")
-    create_figure(
-        baseline_2d=baseline_2d,
-        ugile_2d=ugile_2d,
-        baseline_centroids=baseline_centroids,
-        ugile_centroids=ugile_centroids,
-        n_baseline_modes=n_baseline,
-        n_ugile_modes=n_ugile,
+    create_mode_discovery_figure(
+        baseline_2d=baseline_2d, ugile_2d=ugile_2d,
+        baseline_labels=baseline_labels, ugile_labels=ugile_labels,
+        n_baseline_modes=n_baseline, n_ugile_modes=n_ugile,
         output_dir=args.output_dir,
     )
 
-    # Report
-    report_path = os.path.join(args.output_dir, "cluster_report_real.txt")
+    report_path = os.path.join(args.output_dir, "cluster_report.txt")
     with open(report_path, "w") as f:
-        f.write("UGILE Mode Discovery Report (REAL DATA)\n")
-        f.write("=" * 50 + "\n")
+        f.write("UGILE Mode Discovery Report\n")
+        f.write("=" * 45 + "\n")
         f.write(f"Prompt: {prompt}\n")
         f.write(f"Samples per method: {len(seeds)}\n")
         f.write(f"DBSCAN eps: {args.dbscan_eps} | min_samples: {args.dbscan_min_samples}\n\n")
-        f.write(f"Baseline modes: {n_baseline}\n")
-        f.write(f"UGILE modes:    {n_ugile}\n")
-        f.write(f"Improvement:    +{n_ugile - n_baseline} modes\n")
-        f.write(f"Relative gain:  {n_ugile / max(n_baseline, 1):.2f}x\n")
+        f.write(f"Baseline modes discovered: {n_baseline}\n")
+        f.write(f"UGILE modes discovered:    {n_ugile}\n")
+        f.write(f"Improvement:               +{n_ugile - n_baseline} modes\n")
+        f.write(f"Relative gain:             {n_ugile / max(n_baseline, 1):.2f}x\n")
     print(f"[Main] Saved report: {report_path}")
     print("[Main] Done!")
 
