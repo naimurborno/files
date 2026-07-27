@@ -4,109 +4,57 @@ model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
 
 
 # ── Device & seed ────────────────────────────────────────────────────
-device: "cuda"   # cuda | cpu | mps
-seed:   41       # fallback seed used by non-ONLB models and --seed CLI override
+device: "cuda"
+seed:   41
 
-# ── Multi-seed generation (sd3_onlb only) ────────────────────────────
-# Each seed produces one independent diverse image from the same prompt.
-# The model is loaded only once; all seeds share the same weights.
-# Remove or leave empty to fall back to the single `seed` value above.
+# ── Multi-seed generation ────────────────────────────────────────────
 seeds:
   - 41
   - 42
   - 43
   - 44
   - 45
-  - 46
-  - 47
-  - 48
-  - 49
-  - 50
-  - 51
-  - 52
-  - 53
-  - 54
-  
 
-# ── Prompts now live in a separate file (prompts-only) ────────────────
 prompts_file: "prompts.yaml"
-
-# (legacy inline list kept only as fallback for other runners; UGILE ignores this)
-
-
 
 negative_prompt: "blurry, low quality, ugly, deformed"
 
-# ── Output path ──────────────────────────────────────────────────────
-# For multi-seed runs the seed index is appended automatically, e.g.:
-#   output11_seed41.png, output11_seed42.png, …
 output: "prompt20.png"
-diverse_output_dir:  "outputs/diverse"    # folder for ONLB diverse images
-original_output_dir: "outputs/original"   # folder for original (non-diverse) images
 
-# ── Image generation ─────────────────────────────────────────────────
+# NOTE: separate output dirs so this run doesn't overwrite your full-method results
+diverse_output_dir:  "outputs/diverse_ablationA"
+original_output_dir: "outputs/original_ablationA"
+
 generation:
   height: 512
   width:  512
 
-# ── Flow / Scheduler (used by sd3, flux, sana, lumina) ───────────────
 flow:
   num_steps:      50
   guidance_scale: 4.0
-  solver:         "euler"    # euler | heun
+  solver:         "euler"
   t_start:        1.0
   t_end:          0.0
 
-# ── Model-specific extra kwargs ──────────────────────────────────────
-# These are passed through to the model loader as opts["model_kwargs"].
-# Add any model-specific settings here.
 model_kwargs: {}
-
-# ── Trajectory saving (run_experiment.py only) ───────────────────────
 save_trajectory: false
-onlb:
-  alpha:         2.0    # traversal modulation strength
-  sigma_thresh:  0.3    # gates β_k to high-noise regime
-  eta:           0.07   # Langevin temperature
-  mu:            0.05   # CFG push weight
-  target_cos:   -0.5    # τ — minimum angular separation
-  sigma_thresh: 0.3
-  diverse_output_dir:  "outputs/diverse"    # folder for ONLB diverse images
-  original_output_dir: "outputs/original"   # folder for original (non-diverse) images
-  save_original: true
-peakback:
-  sigma_lo:       0.15
-  sigma_hi:       0.45
-  quantile_alpha: 0.15
-  eta:            1.0
-  K_max:          15
-  theta_max:      0.25
-  delta:          0.5
-  min_sep:        3
-  J:              2
-  min_sep:        3
-  exact_leverage: false
-  diverse_output_dir:  "outputs/diverse"
-  original_output_dir: "outputs/original"
-  save_original: true
 
 ugile:
-  num_grad_steps:      50      # backward passes for escape direction
-  sigma_lo:            -1.0   # which cached steps to use
+  num_grad_steps:      50
+  sigma_lo:            -1.0
   sigma_hi:            1.0
-  escape_scale:        1.0    # how far to push x_0 along escape direction
-  theta_max:           0.75   # max geodesic angle
-  walk_steps:          10     # split into 10 small steps of 0.06 rad each
-  branch_noise:        0.7    # lateral offset for inter-branch diversity
-  J:                   1      # number of diverse images per seed
-  diverse_output_dir:  "outputs/diverse"
-  original_output_dir: "outputs/original"
+  escape_scale:        1.0
+  theta_max:           0.75      # ← keep IDENTICAL to your full-method config
+  walk_steps:          10
+  branch_noise:        0.7
+  J:                   1
+  noise_scale:         8.0       # ← keep IDENTICAL to your full-method config
+  diverse_output_dir:  "outputs/diverse_ablationA"
+  original_output_dir: "outputs/original_ablationA"
   save_original:       true
 
-# ── PeakBack swap example ────────────────────────────────────────────
-# model_name: "sd3_peakback"
-# model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
-
-# ── ONLB swap example ────────────────────────────────────────────────
-# model_name: "sd3_onlb"
-# model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
+  # ── ABLATION A ────────────────────────────────────────────────────
+  # false = skip the 3-step power iteration; use a random direction
+  #         (orthogonalized against the semantic direction) instead of
+  #         the covariance-refined v_boundary.
+  use_power_iteration: false

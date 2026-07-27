@@ -36,33 +36,35 @@ class UGILESampler:
         self,
         unet,
         scheduler,
-        cfg             : dict,
-        device          : str   = "cuda",
-        num_grad_steps  : int   = 5,
-        sigma_lo        : float = 0.3,
-        sigma_hi        : float = 0.9,
-        escape_scale    : float = 3.0,
-        theta_max       : float = 0.75,  # Increased to push Vendi Score up
-        walk_steps      : int   = 10,
-        J               : int   = 1,
-        eps             : float = 1e-8,
-        noise_scale     : float = 10.0,   # Lowered base scale for SD3 stability
-        gamma           : float = 1.2,
+        cfg                 : dict,
+        device               : str   = "cuda",
+        num_grad_steps       : int   = 5,
+        sigma_lo             : float = 0.3,
+        sigma_hi             : float = 0.9,
+        escape_scale         : float = 3.0,
+        theta_max            : float = 0.75,  # Increased to push Vendi Score up
+        walk_steps           : int   = 10,
+        J                    : int   = 1,
+        eps                  : float = 1e-8,
+        noise_scale          : float = 10.0,   # Lowered base scale for SD3 stability
+        gamma                : float = 1.2,
+        use_power_iteration  : bool  = True,   # ← ABLATION A TOGGLE
     ):
-        self.unet           = unet
-        self.scheduler      = scheduler
-        self.cfg            = cfg
-        self.device         = device
-        self.num_grad_steps = num_grad_steps
-        self.sigma_lo       = sigma_lo
-        self.sigma_hi       = sigma_hi
-        self.escape_scale   = escape_scale
-        self.theta_max      = theta_max
-        self.walk_steps     = walk_steps
-        self.J              = J
-        self.eps            = eps
-        self.noise_scale    = noise_scale
-        self.gamma          = gamma
+        self.unet                = unet
+        self.scheduler            = scheduler
+        self.cfg                  = cfg
+        self.device               = device
+        self.num_grad_steps       = num_grad_steps
+        self.sigma_lo             = sigma_lo
+        self.sigma_hi             = sigma_hi
+        self.escape_scale         = escape_scale
+        self.theta_max            = theta_max
+        self.walk_steps           = walk_steps
+        self.J                    = J
+        self.eps                  = eps
+        self.noise_scale          = noise_scale
+        self.gamma                = gamma
+        self.use_power_iteration  = use_power_iteration   # ← ABLATION A TOGGLE
 
         f_cfg               = cfg.get("flow", {})
         self.num_steps      = f_cfg.get("num_steps",      50)
@@ -108,7 +110,7 @@ class UGILESampler:
         # FIX 1: Hard Clamp Epsilon to 2% of latent radius to prevent SD3 VAE breakdown
         # (5% was too high and caused shredded grass artifacts)
         r = x0.float().norm().item()
-        max_eps = r * 0.02 
+        max_eps = r * 0.02
         epsilon = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
         epsilon = min(epsilon, max_eps)
 
@@ -117,16 +119,27 @@ class UGILESampler:
         rng_cov.manual_seed(seed * 10000 + 0)
         v_boundary = torch.randn(x0.shape, generator=rng_cov, dtype=torch.float32, device=x0.device).flatten()
 
-        s_flat_for_diff = semantic_dir.flatten()
-        diffs_centered = [(diff.flatten() - s_flat_for_diff) for diff in diffs]
+        if self.use_power_iteration:
+            # --- FULL METHOD: power iteration on the U-weighted covariance
+            #     of centered CFG deltas, refining v_boundary toward the
+            #     dominant direction of trajectory variance, orthogonal to s_flat.
+            s_flat_for_diff = semantic_dir.flatten()
+            diffs_centered = [(diff.flatten() - s_flat_for_diff) for diff in diffs]
 
-        for _ in range(3):
-            v_next = torch.zeros_like(v_boundary)
-            for k in range(N):
-                dot_product = torch.dot(diffs_centered[k], v_boundary)
-                v_next += w[k] * diffs_centered[k] * dot_product
+            for _ in range(3):
+                v_next = torch.zeros_like(v_boundary)
+                for k in range(N):
+                    dot_product = torch.dot(diffs_centered[k], v_boundary)
+                    v_next += w[k] * diffs_centered[k] * dot_product
 
-            v_boundary = v_next
+                v_boundary = v_next
+                v_boundary = v_boundary - torch.dot(v_boundary, s_flat) * s_flat
+                v_boundary = v_boundary / (v_boundary.norm() + self.eps)
+        else:
+            # --- ABLATION A: skip power iteration entirely.
+            #     Use the raw random vector, only orthogonalized against s_flat
+            #     (same final projection/normalization the full method also applies),
+            #     to isolate whether the covariance-direction refinement matters.
             v_boundary = v_boundary - torch.dot(v_boundary, s_flat) * s_flat
             v_boundary = v_boundary / (v_boundary.norm() + self.eps)
 
@@ -163,7 +176,7 @@ class UGILESampler:
 
         # FIX 3: True 11x11 Gaussian Blur (Replaces AvgPool)
         # AvgPool leaves subtle grid edges that SD3's 16-channel VAE decodes as artifacts.
-        # An 11x11 Gaussian convolution with sigma=2.0 perfectly isolates low-frequency 
+        # An 11x11 Gaussian convolution with sigma=2.0 perfectly isolates low-frequency
         # pose/layout structure with zero grid artifacts.
         if x0.dim() == 4:
             B, C, H, W = xi.shape
@@ -172,9 +185,9 @@ class UGILESampler:
             gauss_1d = torch.exp(-(coords**2) / (2 * sigma**2))
             gauss_1d = gauss_1d / gauss_1d.sum()
             kernel = torch.outer(gauss_1d, gauss_1d).view(1, 1, 11, 11).repeat(C, 1, 1, 1)
-            
+
             xi_low = F.conv2d(xi, kernel, padding=5, groups=C)
-            
+
             # 60% low-freq (pose) + 40% high-freq (natural texture diversity)
             xi = 0.65 * xi_low + 0.35 * xi
 
@@ -410,19 +423,20 @@ def run_sd3_ugile(opts: dict):
     wrapper.load()
 
     sampler = UGILESampler(
-        unet            = wrapper.transformer,
-        scheduler       = wrapper.scheduler,
-        cfg             = cfg,
-        device          = device,
-        num_grad_steps  = ug_cfg.get("num_grad_steps",  5),
-        sigma_lo        = ug_cfg.get("sigma_lo",        0.3),
-        sigma_hi        = ug_cfg.get("sigma_hi",        0.9),
-        escape_scale    = ug_cfg.get("escape_scale",    3.0),
-        theta_max       = ug_cfg.get("theta_max",       0.75),
-        walk_steps      = ug_cfg.get("walk_steps",      10),
-        J               = ug_cfg.get("J",               1),
-        noise_scale     = ug_cfg.get("noise_scale",     8.0),
-        gamma           = ug_cfg.get("gamma",           1.2),
+        unet                = wrapper.transformer,
+        scheduler           = wrapper.scheduler,
+        cfg                 = cfg,
+        device              = device,
+        num_grad_steps      = ug_cfg.get("num_grad_steps",  5),
+        sigma_lo            = ug_cfg.get("sigma_lo",        0.3),
+        sigma_hi            = ug_cfg.get("sigma_hi",        0.9),
+        escape_scale        = ug_cfg.get("escape_scale",    3.0),
+        theta_max           = ug_cfg.get("theta_max",       0.75),
+        walk_steps          = ug_cfg.get("walk_steps",      10),
+        J                   = ug_cfg.get("J",               1),
+        noise_scale         = ug_cfg.get("noise_scale",     8.0),
+        gamma               = ug_cfg.get("gamma",           1.2),
+        use_power_iteration = ug_cfg.get("use_power_iteration", True),  # ← ABLATION A TOGGLE
     )
 
     base_out        = Path(opts["output"])
@@ -463,12 +477,12 @@ def run_sd3_ugile(opts: dict):
             result  = sampler.run(latents, prompt_embeds, pooled_embeds, seed=seed)
 
             if save_original:
-                
+
                 base_path = _base_path(global_idx, seed)
                 wrapper.decode_latents(result["original_latents"]).save(base_path)
 
             for br in result["branches"]:
-                
+
                 out_path = _branch_path(global_idx, seed, br["branch_idx"])
                 wrapper.decode_latents(br["latents"]).save(out_path)
 
