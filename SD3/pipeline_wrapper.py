@@ -26,7 +26,8 @@ from PIL import Image
 
 # from q1_entropy_analysis import Q1EntropyAnalyzer   # ← Q1 addition
 # from stochastic_sampler  import StochasticVelocitySampler
-
+diffusers.utils.logging.set_verbosity_error()
+transformers.utils.logging.set_verbosity_error()
 
 class SD3PipelineWrapper:
 
@@ -63,6 +64,7 @@ class SD3PipelineWrapper:
             tokenizer_3      = None,
         ).to(self.device)
         # self.pipe.enable_model_cpu_offload()
+        self.pipe.set_progress_bar_config(disable=True)
 
         self.tokenizer      = self.pipe.tokenizer
         self.tokenizer_2    = self.pipe.tokenizer_2
