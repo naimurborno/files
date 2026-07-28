@@ -30,7 +30,14 @@ import transformers
 # from stochastic_sampler  import StochasticVelocitySampler
 diffusers.utils.logging.set_verbosity_error()
 transformers.utils.logging.set_verbosity_error()
+import os, warnings, logging as pylogging
 
+os.environ["HF_HUB_DISABLE_PROGRESS_BAR"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+warnings.filterwarnings("ignore")
+pylogging.getLogger("diffusers").setLevel(pylogging.ERROR)
+pylogging.getLogger("transformers").setLevel(pylogging.ERROR)
 class SD3PipelineWrapper:
 
     def __init__(self, cfg: dict, device: str = "cuda"):
