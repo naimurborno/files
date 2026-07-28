@@ -448,11 +448,10 @@ def run_sd3_ugile(opts: dict):
     save_original   = ug_cfg.get("save_original", True)
 
     def _base_path(prompt_idx, seed):
-        # Filename = prompt position (1-indexed), e.g. prompt 0 -> "1.png"
-        return original_folder / (f"{prompt_idx + 1}" + base_out.suffix)
+        return original_folder / f"{prompt_idx + 1}_seed{seed}{base_out.suffix}"
 
     def _branch_path(prompt_idx, seed, j):
-        return diverse_folder / (f"{prompt_idx + 1}" + base_out.suffix)
+        return diverse_folder / f"{prompt_idx + 1}_seed{seed}_branch{j}{base_out.suffix}"
 
     records = []
     total = len(prompts) * len(seeds)
