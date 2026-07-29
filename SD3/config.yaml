@@ -22,8 +22,8 @@ negative_prompt: "blurry, low quality, ugly, deformed"
 output: "prompt20.png"
 
 # NOTE: separate output dirs so this run doesn't overwrite your full-method results
-diverse_output_dir:  "outputs/diverse_ablationA"
-original_output_dir: "outputs/original_ablationA"
+diverse_output_dir:  "outputs/diverse"
+original_output_dir: "outputs/original"
 
 generation:
   height: 512
@@ -31,7 +31,7 @@ generation:
 
 flow:
   num_steps:      50
-  guidance_scale: 4.0
+  guidance_scale: 5.0
   solver:         "euler"
   t_start:        1.0
   t_end:          0.0
@@ -57,4 +57,4 @@ ugile:
   # false = skip the 3-step power iteration; use a random direction
   #         (orthogonalized against the semantic direction) instead of
   #         the covariance-refined v_boundary.
-  use_power_iteration: false
+  use_power_iteration: true
