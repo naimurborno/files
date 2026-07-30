@@ -10,10 +10,10 @@ seed:   41
 # ── Multi-seed generation ────────────────────────────────────────────
 seeds:
   - 41
-  - 42
-  - 43
-  - 44
-  - 45
+  # - 42
+  # - 43
+  # - 44
+  # - 45
 
 prompts_file: "prompts.yaml"
 
