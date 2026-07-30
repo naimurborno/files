@@ -31,7 +31,7 @@ generation:
 
 flow:
   num_steps:      50
-  guidance_scale: 6.0
+  guidance_scale: 7.0
   solver:         "euler"
   t_start:        1.0
   t_end:          0.0
