@@ -1,0 +1,29 @@
+model_name: "sdxl_ugile"
+model_id:   "stabilityai/stable-diffusion-xl-base-1.0"
+
+device: "cuda"
+
+prompts_file: "prompts.yaml" #put the prompts files link in here.
+negative_prompt: "blurry, low quality, ugly, deformed"
+
+# seed: 42
+seeds: [41, 42, 43, 44, 45]        # uncomment for multi-seed runs
+
+output: "output.png"
+
+generation:
+  height: 1024
+  width:  1024
+
+flow:
+  num_steps: 50
+  guidance_scale: 4.0
+
+ugile:
+  sigma_lo: 0.3
+  sigma_hi: 0.9
+  theta_max: 0.5
+  noise_scale: 1.5
+  save_original: true
+  original_output_dir: "outputs/original"
+  diverse_output_dir:  "outputs/diverse"

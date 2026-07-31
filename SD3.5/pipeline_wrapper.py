@@ -26,7 +26,19 @@ from PIL import Image
 
 # from q1_entropy_analysis import Q1EntropyAnalyzer   # ← Q1 addition
 # from stochastic_sampler  import StochasticVelocitySampler
+import diffusers
+import transformers
+diffusers.utils.logging.set_verbosity_error()
+transformers.utils.logging.set_verbosity_error()
+import os, warnings, logging as pylogging
+import contextlib, io
 
+os.environ["HF_HUB_DISABLE_PROGRESS_BAR"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+warnings.filterwarnings("ignore")
+pylogging.getLogger("diffusers").setLevel(pylogging.ERROR)
+pylogging.getLogger("transformers").setLevel(pylogging.ERROR)
 
 class SD3PipelineWrapper:
 
@@ -55,14 +67,16 @@ class SD3PipelineWrapper:
         model_id = self.cfg.get("model_id", "stabilityai/stable-diffusion-3-medium-diffusers")
 
         print(f"[Pipeline] Loading: {model_id}")
-
-        self.pipe = StableDiffusion3Pipeline.from_pretrained(
-            model_id,
-            torch_dtype      = torch.float16,
-            text_encoder_3   = None,
-            tokenizer_3      = None,
-        ).to(self.device)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            self.pipe = StableDiffusion3Pipeline.from_pretrained(
+                model_id,
+                torch_dtype      = torch.float16,
+                text_encoder_3   = None,
+                tokenizer_3      = None,
+            ).to(self.device)
         # self.pipe.enable_model_cpu_offload()
+        self.pipe.set_progress_bar_config(disable=True)
 
         self.tokenizer      = self.pipe.tokenizer
         self.tokenizer_2    = self.pipe.tokenizer_2
