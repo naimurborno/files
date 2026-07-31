@@ -1,0 +1,29 @@
+model_name: "sd21_ugile"
+model_id:   "stabilityai/stable-diffusion-2-1"
+
+device: "cuda"
+seed:   41
+seeds: [41, 42, 43, 44, 45]
+
+prompts_file: "prompts.yaml"
+
+negative_prompt: ""
+
+output: "prompt_sd21.png"
+
+generation:
+  height: 512
+  width:  512
+
+flow:
+  num_steps:      50
+  guidance_scale: 7.5
+
+ugile:
+  sigma_lo:     0.3
+  sigma_hi:     0.9
+  theta_max:    1.8
+  noise_scale:  15
+  diverse_output_dir:  "outputs/diverse"
+  original_output_dir: "outputs/original"
+  save_original: true
