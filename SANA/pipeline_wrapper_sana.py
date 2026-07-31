@@ -33,8 +33,19 @@ weights stay frozen unless explicitly unfrozen.
 import torch
 from diffusers import SanaPipeline, FlowMatchEulerDiscreteScheduler
 from PIL import Image
+import diffusers
+import transformers
+diffusers.utils.logging.set_verbosity_error()
+transformers.utils.logging.set_verbosity_error()
+import os, warnings, logging as pylogging
+import contextlib, io
 
-
+os.environ["HF_HUB_DISABLE_PROGRESS_BAR"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+warnings.filterwarnings("ignore")
+pylogging.getLogger("diffusers").setLevel(pylogging.ERROR)
+pylogging.getLogger("transformers").setLevel(pylogging.ERROR)
 class SanaPipelineWrapper:
 
     def __init__(self, cfg: dict, device: str = "cuda"):
@@ -61,13 +72,15 @@ class SanaPipelineWrapper:
         )
 
         print(f"[Pipeline] Loading: {model_id}")
+        buf = io.StringIO()
 
-        self.pipe = SanaPipeline.from_pretrained(
-            model_id,
-            variant     = "fp16",          # drop this if your repo has no fp16 variant
-            torch_dtype = torch.float16,
-        ).to(self.device)
-
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            self.pipe = SanaPipeline.from_pretrained(
+                model_id,
+                variant     = "fp16",          # drop this if your repo has no fp16 variant
+                torch_dtype = torch.float16,
+            ).to(self.device)
+        self.pipe.set_progress_bar_config(disable=True)
         # Per SANA's model card: the transformer can stay fp16, but the
         # text encoder (Gemma-2) and VAE (DC-AE) need bf16/fp32 to stay
         # numerically stable. This has no SD3 analog — SD3's CLIP/T5/VAE
