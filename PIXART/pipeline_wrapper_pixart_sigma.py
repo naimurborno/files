@@ -20,7 +20,19 @@ PixArt-Sigma specifics UGILE's forward call must handle:
 import torch
 from diffusers import PixArtSigmaPipeline, DPMSolverMultistepScheduler
 from PIL import Image
+import diffusers
+import transformers
+diffusers.utils.logging.set_verbosity_error()
+transformers.utils.logging.set_verbosity_error()
+import os, warnings, logging as pylogging
+import contextlib, io
 
+os.environ["HF_HUB_DISABLE_PROGRESS_BAR"] = "1"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+warnings.filterwarnings("ignore")
+pylogging.getLogger("diffusers").setLevel(pylogging.ERROR)
+pylogging.getLogger("transformers").setLevel(pylogging.ERROR)
 
 class PixArtSigmaPipelineWrapper:
 
@@ -41,11 +53,13 @@ class PixArtSigmaPipelineWrapper:
             "model_id", "PixArt-alpha/PixArt-Sigma-XL-2-512-MS"
         )
         print(f"[Pipeline] Loading: {model_id}")
-
-        self.pipe = PixArtSigmaPipeline.from_pretrained(
-            model_id, torch_dtype=torch.float16,
-        ).to(self.device)
-
+        buf = io.StringIO()
+        
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            self.pipe = PixArtSigmaPipeline.from_pretrained(
+                model_id, torch_dtype=torch.float16,
+            ).to(self.device)
+        self.pipe.set_progress_bar_config(disable=True)
         self.tokenizer    = self.pipe.tokenizer
         self.text_encoder = self.pipe.text_encoder
         self.transformer   = self.pipe.transformer
