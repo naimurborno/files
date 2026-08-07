@@ -12,7 +12,7 @@ model:
 
 # These two keys are placeholders — the launcher script overwrites them
 # per-GPU (config_gpu0.yaml / config_gpu1.yaml) before calling inference.py.
-prompts_file: "/kaggle/working/files/SD3/prompts.yaml"
+prompts_file: "/kaggle/working/files/CADS/prompts.yaml"
 prompt_offset: 0
 
 generation:
