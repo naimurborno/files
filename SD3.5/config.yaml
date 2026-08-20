@@ -80,7 +80,7 @@ peakback:
   save_original: true
 
 ugile:
-  theta_max:           0.75   # max geodesic angle (Eq. 16 caps the actual escape budget at this)
+  theta_max:           5   # max geodesic angle (Eq. 16 caps the actual escape budget at this)
   noise_scale:         8.0   # Phase-2 curvature-scaled pre-perturbation strength
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
