@@ -80,14 +80,8 @@ peakback:
   save_original: true
 
 ugile:
-  num_grad_steps:      50      # backward passes for escape direction
-  sigma_lo:            -1.0   # which cached steps to use
-  sigma_hi:            1.0
-  escape_scale:        1.0    # how far to push x_0 along escape direction
-  theta_max:           0.4  # max geodesic angle
-  walk_steps:          10     # split into 10 small steps of 0.06 rad each
-  branch_noise:        0.7    # lateral offset for inter-branch diversity
-  J:                   1      # number of diverse images per seed
+  theta_max:           0.75   # max geodesic angle (Eq. 16 caps the actual escape budget at this)
+  noise_scale:         8.0   # Phase-2 curvature-scaled pre-perturbation strength
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
   save_original:       true
