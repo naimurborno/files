@@ -179,10 +179,15 @@ class UGILESampler:
         xi_flat = joint_projector(xi_flat, s_flat, x0p_flat)
 
         e_hat = xi_flat.view_as(x0_perturbed)
-        e_hat = e_hat / (e_hat.norm() + self.eps)
 
-        theta = self.theta_max
-        x0_new = math.cos(theta) * x0_perturbed + math.sin(theta) * r * e_hat
+        # Eq. 16-17: theta is the escape budget derived from the projected
+        # vector's own norm, capped by theta_max — not always theta_max.
+        # geodesic_step() also performs the exact-norm great-circle move
+        # (Eq. 17-18), replacing the manual cos/sin computation below.
+        x0_new, theta = geodesic_step(
+            x0_perturbed, e_hat, r, theta_max=self.theta_max
+        )
+        theta = theta.item()
         x0_new = x0_new.to(x0.dtype)
 
         cos_x0 = torch.nn.functional.cosine_similarity(
