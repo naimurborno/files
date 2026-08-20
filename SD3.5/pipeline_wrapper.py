@@ -114,13 +114,39 @@ class SD3PipelineWrapper:
     # ================================================================== #
 
     def encode_prompt(self, prompt: str, negative_prompt: str = ""):
+        """
+        Encode prompts via the pipeline's own official encode_prompt() —
+        the exact same call path _generate_standard() triggers internally
+        through self.pipe(...). This guarantees the baseline and UGILE
+        branches receive bit-for-bit identical conditioning tensors
+        (audit fix #3: no more manually reconstructed embeddings for UGILE
+        while baseline uses the official Diffusers path).
+
+        text_encoder_3 / tokenizer_3 are None in this wrapper (T5 disabled
+        for memory), which the official encode_prompt() already handles by
+        producing zero-filled T5 embeddings of the correct shape — so this
+        preserves the T5-disabled setup while fixing the parity issue.
+        """
         do_cfg = self.cfg.get("flow", {}).get("guidance_scale", 7.5) > 1.0
 
         with torch.no_grad():
-            cond_emb, cond_pooled = self._encode_prompt_single(prompt)
+            (
+                cond_emb,
+                uncond_emb,
+                cond_pooled,
+                uncond_pooled,
+            ) = self.pipe.encode_prompt(
+                prompt                      = prompt,
+                prompt_2                    = prompt,
+                prompt_3                    = prompt,
+                negative_prompt             = negative_prompt,
+                negative_prompt_2           = negative_prompt,
+                negative_prompt_3           = negative_prompt,
+                do_classifier_free_guidance = do_cfg,
+                device                      = self.device,
+            )
 
             if do_cfg:
-                uncond_emb, uncond_pooled = self._encode_prompt_single(negative_prompt)
                 prompt_embeds        = torch.cat([uncond_emb,    cond_emb])
                 pooled_prompt_embeds = torch.cat([uncond_pooled, cond_pooled])
             else:
@@ -128,38 +154,6 @@ class SD3PipelineWrapper:
                 pooled_prompt_embeds = cond_pooled
 
         return prompt_embeds, pooled_prompt_embeds
-
-    def _encode_prompt_single(self, text: str):
-        max_len_clip = self.tokenizer.model_max_length
-
-        def _tok(tokenizer, text, max_length):
-            return tokenizer(
-                text,
-                padding        = "max_length",
-                max_length     = max_length,
-                truncation     = True,
-                return_tensors = "pt",
-            ).input_ids.to(self.device)
-
-        ids_l    = _tok(self.tokenizer, text, max_len_clip)
-        out_l    = self.text_encoder(ids_l, output_hidden_states=True)
-        emb_l    = out_l.hidden_states[-2]
-        pooled_l = out_l.hidden_states[-1][:, -1, :]
-
-        ids_g    = _tok(self.tokenizer_2, text, max_len_clip)
-        out_g    = self.text_encoder_2(ids_g, output_hidden_states=True)
-        emb_g    = out_g.hidden_states[-2]
-        pooled_g = out_g.text_embeds
-
-        D_joint      = 4096
-        emb_l_pad    = torch.nn.functional.pad(emb_l, (0, D_joint - emb_l.shape[-1]))
-        emb_g_pad    = torch.nn.functional.pad(emb_g, (0, D_joint - emb_g.shape[-1]))
-        emb_t5_zero  = torch.zeros(1, 256, D_joint, dtype=emb_l.dtype, device=self.device)
-
-        emb_all = torch.cat([emb_l_pad, emb_g_pad, emb_t5_zero], dim=1)
-        pooled  = torch.cat([pooled_l, pooled_g], dim=-1)
-
-        return emb_all, pooled
 
     # ================================================================== #
     #  LATENT HELPERS                                                     #
