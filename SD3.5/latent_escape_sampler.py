@@ -136,11 +136,11 @@ class UGILESampler:
         if eta.dim() == 4:
             eta = eta - eta.mean(dim=(2, 3), keepdim=True)
 
-        # Project eta onto span{x0, s_hat}^\perp
+        # Project eta jointly onto span{s_hat, x0}^\perp (Eq. 10 — single linear
+        # solve, NOT two sequential single-vector projections).
         x0_flat = x0.float().flatten()
         eta_flat = eta.flatten()
-        eta_flat = eta_flat - torch.dot(eta_flat, x0_flat) / (torch.dot(x0_flat, x0_flat) + self.eps) * x0_flat
-        eta_flat = eta_flat - torch.dot(eta_flat, s_flat) * s_flat
+        eta_flat = joint_projector(eta_flat, s_flat, x0_flat)
         eta = eta_flat.view_as(x0)
 
         # Normalize and scale noise
@@ -172,11 +172,11 @@ class UGILESampler:
             # 60% low-freq (pose) + 40% high-freq (natural texture diversity)
             xi = 0.80 * xi_low + 0.20 * xi
 
-        # Gram-Schmidt: remove component along semantic_unit and x0_perturbed
+        # Joint projection onto span{s_hat, x0_perturbed}^\perp (Eq. 14 — same
+        # single linear solve used by the other architecture ports).
         xi_flat = xi.flatten()
-        xi_flat = xi_flat - torch.dot(xi_flat, s_flat) * s_flat
         x0p_flat = x0_perturbed.flatten()
-        xi_flat = xi_flat - torch.dot(xi_flat, x0p_flat) / (torch.dot(x0p_flat, x0p_flat) + self.eps) * x0p_flat
+        xi_flat = joint_projector(xi_flat, s_flat, x0p_flat)
 
         e_hat = xi_flat.view_as(x0_perturbed)
         e_hat = e_hat / (e_hat.norm() + self.eps)
