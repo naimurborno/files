@@ -184,10 +184,17 @@ class UGILESampler:
         # vector's own norm, capped by theta_max — not always theta_max.
         # geodesic_step() also performs the exact-norm great-circle move
         # (Eq. 17-18), replacing the manual cos/sin computation below.
+        # theta = min(escape_scale * ||w||/r, theta_max). escape_scale lets you
+        # push the natural escape ratio up when it's small (as observed —
+        # theta_max wasn't the binding constraint), while theta_max remains a
+        # hard ceiling so theta can never exceed a safe bound.
         x0_new, theta = geodesic_step(
-            x0_perturbed, e_hat, r, theta_max=self.theta_max
+            x0_perturbed, self.escape_scale * e_hat, r, theta_max=self.theta_max
         )
         theta = theta.item()
+        print(f"[UGILE debug] ||w||/r = {e_hat.norm().item()/r:.4f}  "
+              f"escape_scale = {self.escape_scale}  theta_max = {self.theta_max}  "
+              f"theta_used = {theta:.4f}")
         x0_new = x0_new.to(x0.dtype)
 
         cos_x0 = torch.nn.functional.cosine_similarity(
