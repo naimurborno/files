@@ -102,7 +102,7 @@ class UGILESampler:
         # FIX 1: Hard Clamp Epsilon to 2% of latent radius to prevent SD3 VAE breakdown
         # (5% was too high and caused shredded grass artifacts)
         r = x0.float().norm().item()
-        max_eps = r * 0.02 
+        max_eps = r * 0.001 
         epsilon = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
         epsilon = min(epsilon, max_eps)
 
