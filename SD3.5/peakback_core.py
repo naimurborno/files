@@ -59,8 +59,8 @@ def geodesic_step(x: torch.Tensor, w: torch.Tensor, r: float, theta_max: float =
     w = w.float()
     w_norm = w.norm() + eps
     theta = w_norm / r
-    # if theta_max is not None:
-    #     theta = torch.clamp(theta, max=theta_max)
+    if theta_max is not None:
+        theta = torch.clamp(theta, max=theta_max)
     w_hat = w / w_norm
     x_new = x * torch.cos(theta) + r * w_hat * torch.sin(theta)
     return x_new, theta
