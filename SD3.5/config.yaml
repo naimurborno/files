@@ -12,11 +12,11 @@ seed:   41       # fallback seed used by non-ONLB models and --seed CLI override
 # The model is loaded only once; all seeds share the same weights.
 # Remove or leave empty to fall back to the single `seed` value above.
 seeds:
-  - 10
-  - 100
-  - 1000
-  - 20
-  - 2000 
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45 
 
 # ── Prompts ───────────────────────────────────────────────────────────
 # If prompts_file is set, prompts are loaded from that external YAML file
@@ -81,8 +81,8 @@ peakback:
 
 ugile:
   theta_max:           0.4   # max geodesic angle (Eq. 16 caps the actual escape budget at this)
-  escape_scale:        1.6
   noise_scale:         8.0   # Phase-2 curvature-scaled pre-perturbation strength
+  max_eps_frac:        0.02  # Phase-2 perturbation cap, as a fraction of latent radius r
   diverse_output_dir:  "outputs/diverse"
   original_output_dir: "outputs/original"
   save_original:       true

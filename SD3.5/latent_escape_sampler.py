@@ -42,6 +42,7 @@ class UGILESampler:
         eps             : float = 1e-8,
         noise_scale     : float = 10.0,   # Lowered base scale for SD3 stability
         gamma           : float = 1.2,
+        max_eps_frac    : float = 0.02,   # cap on Phase-2 perturbation, as a fraction of r
     ):
         self.unet           = unet
         self.scheduler      = scheduler
@@ -57,6 +58,7 @@ class UGILESampler:
         self.eps            = eps
         self.noise_scale    = noise_scale
         self.gamma          = gamma
+        self.max_eps_frac   = max_eps_frac
 
         f_cfg               = cfg.get("flow", {})
         self.num_steps      = f_cfg.get("num_steps",      50)
@@ -99,12 +101,15 @@ class UGILESampler:
         else:
             kappa = 1.0
 
-        # FIX 1: Hard Clamp Epsilon to 2% of latent radius to prevent SD3 VAE breakdown
-        # (5% was too high and caused shredded grass artifacts)
+        # FIX 1: Clamp epsilon to a fraction of the latent radius to prevent
+        # SD3 VAE breakdown (now tunable via max_eps_frac instead of hardcoded).
         r = x0.float().norm().item()
-        max_eps = r * 0.0001 
-        epsilon = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
-        epsilon = min(epsilon, max_eps)
+        max_eps = r * self.max_eps_frac
+        epsilon_raw = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
+        epsilon = min(epsilon_raw, max_eps)
+        print(f"[UGILE debug] kappa={kappa:.4f}  epsilon_raw={epsilon_raw:.4f}  "
+              f"max_eps={max_eps:.4f}  epsilon_used={epsilon:.4f}  "
+              f"{'CAPPED' if epsilon_raw > max_eps else 'uncapped'}")
 
         # A1: Full Trajectory-Covariance-Anchored Noise (Background Diversity)
         rng_cov = torch.Generator(device=x0.device)
@@ -429,6 +434,7 @@ def run_sd3_ugile(opts: dict):
         J               = ug_cfg.get("J",               1),
         noise_scale     = ug_cfg.get("noise_scale",     8.0),
         gamma           = ug_cfg.get("gamma",           1.2),
+        max_eps_frac    = ug_cfg.get("max_eps_frac",    0.02),
     )
 
     base_out        = Path(opts["output"])
