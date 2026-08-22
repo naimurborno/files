@@ -80,10 +80,10 @@ peakback:
   save_original: true
 
 ugile:
-  theta_max:           0.4   # max geodesic angle (Eq. 16 caps the actual escape budget at this)
-  noise_scale:         8.0   # Phase-2 curvature-scaled pre-perturbation strength
-  max_eps_frac:        0.02  # Phase-2 perturbation cap, as a fraction of latent radius r
-  diverse_output_dir:  "outputs/diverse"
+  theta_max:    0.3     # dial this, not escape_scale, for diversity vs. quality
+  escape_scale: 3.0      # keep — just ensures the clamp is the binding constraint
+  noise_scale:  8.0
+  max_eps_frac: 0.02
   original_output_dir: "outputs/original"
   save_original:       true
 
