@@ -74,15 +74,19 @@ class ClipMetrics:
     @torch.no_grad()
     def image_embeddings(self, images: list) -> torch.Tensor:
         inputs = self.processor(images=images, return_tensors="pt").to(self.device)
-        out = self.model.get_image_features(**inputs)
-        feats = out.image_embeds if hasattr(out, "image_embeds") else out
+        vision_out = self.model.vision_model(pixel_values=inputs["pixel_values"])
+        pooled = vision_out.pooler_output
+        feats = self.model.visual_projection(pooled)
         return torch.nn.functional.normalize(feats, dim=-1)
 
     @torch.no_grad()
     def text_embedding(self, prompt: str) -> torch.Tensor:
         inputs = self.processor(text=[prompt], return_tensors="pt", padding=True).to(self.device)
-        out = self.model.get_text_features(**inputs)
-        feats = out.text_embeds if hasattr(out, "text_embeds") else out
+        text_out = self.model.text_model(
+            input_ids=inputs["input_ids"], attention_mask=inputs.get("attention_mask")
+        )
+        pooled = text_out.pooler_output
+        feats = self.model.text_projection(pooled)
         return torch.nn.functional.normalize(feats, dim=-1)
 
     def clip_score(self, images: list, prompt: str) -> float:
