@@ -107,9 +107,9 @@ class UGILESampler:
         max_eps = r * self.max_eps_frac
         epsilon_raw = self.noise_scale * (1.0 / (math.sqrt(kappa) + self.eps))
         epsilon = min(epsilon_raw, max_eps)
-        print(f"[UGILE debug] kappa={kappa:.4f}  epsilon_raw={epsilon_raw:.4f}  "
-              f"max_eps={max_eps:.4f}  epsilon_used={epsilon:.4f}  "
-              f"{'CAPPED' if epsilon_raw > max_eps else 'uncapped'}")
+        # print(f"[UGILE debug] kappa={kappa:.4f}  epsilon_raw={epsilon_raw:.4f}  "
+        #       f"max_eps={max_eps:.4f}  epsilon_used={epsilon:.4f}  "
+        #       f"{'CAPPED' if epsilon_raw > max_eps else 'uncapped'}")
 
         # A1: Full Trajectory-Covariance-Anchored Noise (Background Diversity)
         rng_cov = torch.Generator(device=x0.device)
