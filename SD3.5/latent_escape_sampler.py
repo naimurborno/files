@@ -197,9 +197,9 @@ class UGILESampler:
             x0_perturbed, self.escape_scale * e_hat, r, theta_max=self.theta_max
         )
         theta = theta.item()
-        print(f"[UGILE debug] ||w||/r = {e_hat.norm().item()/r:.4f}  "
-              f"escape_scale = {self.escape_scale}  theta_max = {self.theta_max}  "
-              f"theta_used = {theta:.4f}")
+        # print(f"[UGILE debug] ||w||/r = {e_hat.norm().item()/r:.4f}  "
+        #       f"escape_scale = {self.escape_scale}  theta_max = {self.theta_max}  "
+        #       f"theta_used = {theta:.4f}")
         x0_new = x0_new.to(x0.dtype)
 
         cos_x0 = torch.nn.functional.cosine_similarity(
