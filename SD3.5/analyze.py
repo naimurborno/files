@@ -85,31 +85,51 @@ def scan(d):
         if m: out[(int(m.group(1)), int(m.group(2)))] = p
     return out
 
+_MODELS = {}
+def _load_models(device):
+    """Load DINOv2 + CLIP once per process (extract_features is called once per arm)."""
+    if device not in _MODELS:
+        from transformers import AutoModel, AutoImageProcessor, CLIPModel, CLIPProcessor
+        _MODELS[device] = (
+            AutoImageProcessor.from_pretrained("facebook/dinov2-base"),
+            AutoModel.from_pretrained("facebook/dinov2-base").to(device).eval(),
+            CLIPProcessor.from_pretrained("openai/clip-vit-base-patch16"),
+            CLIPModel.from_pretrained("openai/clip-vit-base-patch16").to(device).eval(),
+        )
+    return _MODELS[device]
+
+def _pooled(out):
+    """Pooled tensor from a HF model output, robust across transformers versions (object or tuple)."""
+    po = getattr(out, "pooler_output", None)
+    return po if po is not None else out[1]
+
 def extract_features(paths, texts=None, device="cuda"):
+    """Returns (dino_cls [n,768], clip_image [n,512], clip_text [n,512] or None).
+    CLIP features are computed via vision_model/text_model + projection layers directly instead of
+    get_image_features/get_text_features, whose return type changed across transformers versions."""
     import torch
     from PIL import Image
-    from transformers import AutoModel, AutoImageProcessor, CLIPModel, CLIPProcessor
-    dino_p = AutoImageProcessor.from_pretrained("facebook/dinov2-base")
-    dino = AutoModel.from_pretrained("facebook/dinov2-base").to(device).eval()
-    clip_p = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch16")
-    clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch16").to(device).eval()
+    dino_p, dino, clip_p, clip = _load_models(device)
     F_d, F_ci, F_ct = [], [], []
     with torch.no_grad():
         for i in range(0, len(paths), 32):
             ims = [Image.open(p).convert("RGB") for p in paths[i:i+32]]
             o = dino(**{k: v.to(device) for k, v in dino_p(images=ims, return_tensors="pt").items()})
             F_d.append(o.last_hidden_state[:, 0].float().cpu().numpy())
-            ci = clip.get_image_features(**{k: v.to(device) for k, v in clip_p(images=ims, return_tensors="pt").items()})
+            pv = clip_p(images=ims, return_tensors="pt")["pixel_values"].to(device)
+            ci = clip.visual_projection(_pooled(clip.vision_model(pixel_values=pv)))
             F_ci.append(ci.float().cpu().numpy())
             if texts is not None:
-                tk = clip_p(text=texts[i:i+32], return_tensors="pt", padding=True, truncation=True, max_length=77)
-                F_ct.append(clip.get_text_features(**{k: v.to(device) for k, v in tk.items()}).float().cpu().numpy())
+                tk = clip_p.tokenizer(texts[i:i+32], return_tensors="pt", padding=True, truncation=True, max_length=77)
+                tk = {k: v.to(device) for k, v in tk.items()}
+                ct = clip.text_projection(_pooled(clip.text_model(input_ids=tk["input_ids"], attention_mask=tk["attention_mask"])))
+                F_ct.append(ct.float().cpu().numpy())
     cat = np.concatenate
     return cat(F_d), cat(F_ci), (cat(F_ct) if texts is not None else None)
 
 def cmd_metrics(a):
     import yaml
-    prompts = yaml.safe_load(open(a.prompts))["prompts"]
+    pd_ = yaml.safe_load(open(a.prompts)); prompts = pd_["prompts"] if isinstance(pd_, dict) else pd_
     arms = {"baseline": scan(a.baseline)}
     for s in a.arm:
         name, path = s.split("=", 1); arms[name] = scan(path)
