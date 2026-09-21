@@ -1,10 +1,10 @@
 """
 run_sweep.py — generates per-arm configs from your config.yaml and runs inference.py.
 
-Usage (from the folder containing inference.py, config.yaml, prompts.yaml):
-    python run_sweep.py --stage A                       # pilot: 10 prompts x 2 seeds, eps_frac sweep
-    python run_sweep.py --stage B --eps 0.10            # 20 prompts x 5 seeds, ablation + window/beta arms
-    python run_sweep.py --stage C --eps 0.10 --window 0.18 --beta 0.85 [--ortho off]   # final: 100 prompts x 5 seeds
+Usage (from any folder on Kaggle):
+    python files/SD3.5/run_sweep.py --stage A                       # pilot: 10 prompts x 2 seeds, eps_frac sweep
+    python files/SD3.5/run_sweep.py --stage B --eps 0.10            # 20 prompts x 5 seeds, ablation + window/beta arms
+    python files/SD3.5/run_sweep.py --stage C --eps 0.10 --window 0.18 --beta 0.85 [--ortho off]   # final: 100 prompts x 5 seeds
     add --dry-run to only write configs and print the commands.
 
 Everything lands under runs/<stage>/<arm>/{diverse,original}. Nothing is overwritten across arms.
@@ -52,13 +52,26 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
-    cfg0 = yaml.safe_load(open(a.config))
+    # --- KAGGLE PATH FIXES ---
+    # Define reference directories explicitly using absolute paths
+    base_dir = Path("/kaggle/working")
+    code_dir = base_dir / "files" / "SD3.5"
+    
+    # Locate configuration base file dynamically if relative path provided
+    config_src = Path(a.config) if Path(a.config).is_absolute() else code_dir / a.config
+
+    cfg0 = yaml.safe_load(open(config_src))
     prompts_src = a.prompts or cfg0.get("prompts_file", "prompts.yaml")
-    all_prompts = yaml.safe_load(open(prompts_src))
+    
+    # Ensure prompts path handles absolute matching
+    prompts_path = Path(prompts_src) if Path(prompts_src).is_absolute() else code_dir / prompts_src
+    all_prompts = yaml.safe_load(open(prompts_path))
 
     n_prompts, seeds = {"A": (10, [41, 42]), "B": (20, [41, 42, 43, 44, 45]), "C": (100, [41, 42, 43, 44, 45])}[a.stage]
     prompts = all_prompts[:n_prompts]
-    root = Path("runs") / a.stage
+    
+    # Save runs folder at the root kaggle working directory level
+    root = base_dir / "runs" / a.stage
     root.mkdir(parents=True, exist_ok=True)
     pfile = root / "prompts.yaml"
     yaml.safe_dump({"prompts": prompts}, open(pfile, "w"))
@@ -68,23 +81,29 @@ def main():
     for i, (name, spec) in enumerate(arms.items()):
         cfg = copy.deepcopy(cfg0)
         cfg["seeds"] = seeds
-        cfg["prompts_file"] = str(pfile)
+        cfg["prompts_file"] = str(pfile.resolve())
         ug = cfg.setdefault("ugile", {})
         ug.update(spec)
-        ug["diverse_output_dir"] = str(root / name / "diverse")
-        ug["original_output_dir"] = str(orig_dir)
+        ug["diverse_output_dir"] = str((root / name / "diverse").resolve())
+        ug["original_output_dir"] = str(orig_dir.resolve())
         # Stage A: every arm computes baseline so cos_xN is logged per arm.
         # Stage B/C: only the first arm generates baseline images (saves ~1 extra pass/image per other arm);
         # cos to baseline is then computed in feature space by analyze.py.
         ug["save_original"] = True if a.stage == "A" else (i == 0)
-        cfg["output"] = str(root / name / "unused.png")   # only its suffix (.png) is used
+        cfg["output"] = str((root / name / "unused.png").resolve())   # only its suffix (.png) is used
+        
         cpath = root / name / "config.yaml"
         cpath.parent.mkdir(parents=True, exist_ok=True)
         yaml.safe_dump(cfg, open(cpath, "w"), sort_keys=False)
-        cmd = [sys.executable, "inference.py", "--config", str(cpath)]
+        
+        # 1. Use absolute path for inference.py
+        # 2. Use absolute path for --config argument (.resolve() forces absolute)
+        cmd = [sys.executable, str((code_dir / "inference.py").resolve()), "--config", str(cpath.resolve())]
+        
         print(f"[{a.stage}/{name}] {' '.join(cmd)}   params={spec}")
         if not a.dry_run:
-            subprocess.run(cmd, check=True, cwd='/kaggle/working/files/SD3.5')
+            # Execute directly with resolved paths, matching code execution environment
+            subprocess.run(cmd, check=True)
 
 if __name__ == "__main__":
     main()
