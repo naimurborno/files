@@ -40,8 +40,8 @@ generation:
 
 # ── Flow / Scheduler (used by sd3, flux, sana, lumina) ───────────────
 flow:
-  num_steps:      50
-  guidance_scale: 4.0
+  num_steps:      28
+  guidance_scale: 7.0
   solver:         "euler"    # euler | heun
   t_start:        1.0
   t_end:          0.0
