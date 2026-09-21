@@ -22,7 +22,6 @@
 # Default is "lite". Pass mode="two_pass" to reproduce old behavior exactly.
 # ---------------------------------------------------------------------------
 import math
-import json
 import torch
 import yaml
 from pathlib import Path
@@ -381,7 +380,6 @@ class UGILESampler:
             "kappa_count": 0,
             "cap_hit_count": 0,
             "total_rel_displacement_sq": 0.0,  # accumulated ||delta||^2, summed across window
-            "trace": [],                       # per-step diagnostics (see _lite_apply_escape_step)
         }
 
         for k, t in enumerate(timesteps):
@@ -410,9 +408,6 @@ class UGILESampler:
                 "window_len": window_len,
                 "mean_kappa": (diag["kappa_sum"] / diag["kappa_count"]) if diag["kappa_count"] else 0.0,
                 "cap_hit_rate": (diag["cap_hit_count"] / diag["kappa_count"]) if diag["kappa_count"] else 0.0,
-                "trace": diag["trace"],
-                "sigma_window": ([diag["trace"][0]["sigma"], diag["trace"][-1]["sigma"]] if diag["trace"] else None),
-                "cos_e_first_last": (diag["trace"][-1]["cos_e_first"] if diag["trace"] else None),
             }],
         }
 
@@ -479,10 +474,6 @@ class UGILESampler:
             else:
                 e_t = joint_projector(e_t, s_flat, z_flat)
         e_t = e_t / (e_t.norm() + self.eps)
-        cos_e_prev  = torch.dot(e_t, diag["_e_prev"]).item() if "_e_prev" in diag else None
-        if "_e_first" not in diag:
-            diag["_e_first"] = e_t.detach().clone()
-        cos_e_first = torch.dot(e_t, diag["_e_first"]).item()
         diag["_e_prev"] = e_t.detach()
 
         # --- annealed, curvature-aware, norm-capped magnitude --------------
@@ -499,24 +490,6 @@ class UGILESampler:
 
         diag["total_rel_displacement_sq"] = diag.get("total_rel_displacement_sq", 0.0) + (eps_t / r_t.item()) ** 2
         diag["total_rel_displacement"] = math.sqrt(diag["total_rel_displacement_sq"])
-
-        # ---- per-step trace (for pilot diagnostics; negligible cost) -------
-        diag["trace"].append({
-            "k"            : k,
-            "sigma"        : sigma_t,
-            "U_t"          : U_t,
-            "delta_norm"   : delta.norm().item(),
-            "r_t"          : r_t.item(),
-            "eps_uncapped" : eps_uncapped,
-            "eps_cap"      : eps_cap,
-            "eps_t"        : eps_t,
-            "gamma_t"      : gamma_t,
-            "rel_disp"     : ((z_pert_flat - z_flat).norm() / r_t).item(),  # actual ||dz||/r after retraction
-            "cos_e_prev"   : cos_e_prev,
-            "cos_e_first"  : cos_e_first,
-            "cos_e_s"      : torch.dot(e_t, s_flat).item(),                 # ~0 when orthogonality is enforced
-            "cap_hit"      : bool(eps_uncapped >= eps_cap - 1e-12),
-        })
 
         return z_pert_flat.view_as(z).to(z.dtype)
 
@@ -799,32 +772,10 @@ def run_sd3_ugile(opts: dict):
                     "prompt"    : prompt,
                     "seed"      : seed,
                     "branch"    : br["branch_idx"],
-                    "theta"     : br["theta"],          # lite: total relative displacement (sqrt sum eps_t^2)/r ; two_pass: geodesic angle
+                    "theta"     : br["theta"],
                     "cos_x0"    : br["cos_x0"],
                     "cos_xN"    : br["cos_xN"],
                     "out_path"  : str(out_path),
-                    # UGILE-Lite diagnostics (absent / None in two_pass mode)
-                    "window_len"      : br.get("window_len"),
-                    "sigma_window"    : br.get("sigma_window"),
-                    "mean_kappa"      : br.get("mean_kappa"),
-                    "cap_hit_rate"    : br.get("cap_hit_rate"),
-                    "cos_e_first_last": br.get("cos_e_first_last"),
-                    "trace"           : br.get("trace"),
                 })
-
-    # Persist run metadata + diagnostics next to the images so every sweep
-    # arm is self-describing (inference.py itself discards the return value).
-    meta = {
-        "sampler_params": {
-            "mode": sampler.mode, "beta": sampler.beta, "window_frac": sampler.window_frac,
-            "disable_orthogonal_projection": sampler.disable_orthogonal_projection,
-            "lite_noise_scale": sampler.lite_noise_scale, "lite_max_eps_frac": sampler.lite_max_eps_frac,
-            "num_steps": sampler.num_steps, "guidance_scale": sampler.guidance_scale,
-        },
-        "seeds": list(seeds), "n_prompts": len(prompts), "prompt_offset": prompt_offset,
-        "records": records,
-    }
-    with open(diverse_folder / f"records_offset{prompt_offset}.json", "w") as f:
-        json.dump(meta, f, indent=1, default=str)
 
     return records
