@@ -84,7 +84,7 @@ def main():
         cmd = [sys.executable, "inference.py", "--config", str(cpath)]
         print(f"[{a.stage}/{name}] {' '.join(cmd)}   params={spec}")
         if not a.dry_run:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, cwd='/kaggle/working/files/SD3.5')
 
 if __name__ == "__main__":
     main()
