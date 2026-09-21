@@ -54,7 +54,7 @@ def main():
 
     cfg0 = yaml.safe_load(open(a.config))
     prompts_src = a.prompts or cfg0.get("prompts_file", "prompts.yaml")
-    all_prompts = yaml.safe_load(open(prompts_src))["prompts"]
+    all_prompts = yaml.safe_load(open(prompts_src))
 
     n_prompts, seeds = {"A": (10, [41, 42]), "B": (20, [41, 42, 43, 44, 45]), "C": (100, [41, 42, 43, 44, 45])}[a.stage]
     prompts = all_prompts[:n_prompts]
