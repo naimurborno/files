@@ -40,17 +40,12 @@ from typing import Dict, Any, List, Optional
 
 
 def load_prompts(path: str) -> List[str]:
-    """Load ONLY the prompts list from a separate prompts yaml file.
-    Accepts either a top-level `prompts:` dict key, or a plain top-level
-    list of prompt strings."""
+    """Load ONLY the prompts list from a separate prompts yaml file."""
     with open(path, "r") as f:
-        data = yaml.safe_load(f)
-    if isinstance(data, dict):
-        prompts = data.get("prompts", [])
-    else:
-        prompts = data or []
+        data = yaml.safe_load(f) or {}
+    prompts = data.get("prompts", [])
     if not prompts:
-        raise ValueError(f"No prompts found in {path}")
+        raise ValueError(f"No 'prompts' key found in {path}")
     return prompts
 
 
@@ -328,6 +323,29 @@ class TDSSampler:
 #  DROP-IN RUNNER                                                         #
 # ══════════════════════════════════════════════════════════════════════ #
 
+def _dispersion_stats(particles: List[torch.Tensor]) -> Dict[str, float]:
+    """
+    Quantify how far apart the final particle latents actually ended up.
+    Returns mean/min/max pairwise L2 distance, plus that distance relative
+    to the particles' own norm (scale-free — comparable across resolutions).
+    """
+    flat = torch.cat([p.reshape(1, -1).float() for p in particles], dim=0)  # (N, D)
+    N = flat.shape[0]
+    if N < 2:
+        return {"mean_pairwise_dist": 0.0, "min_pairwise_dist": 0.0,
+                "max_pairwise_dist": 0.0, "mean_relative_dist": 0.0}
+    d = torch.cdist(flat, flat)                      # (N, N)
+    iu = torch.triu_indices(N, N, offset=1)
+    dists = d[iu[0], iu[1]]
+    mean_norm = flat.norm(dim=-1).mean().clamp_min(1e-8)
+    return {
+        "mean_pairwise_dist":   dists.mean().item(),
+        "min_pairwise_dist":    dists.min().item(),
+        "max_pairwise_dist":    dists.max().item(),
+        "mean_relative_dist":   (dists.mean() / mean_norm).item(),  # dist as a fraction of ||x||
+    }
+
+
 def run_sd3_tds(opts: dict):
     from pipeline_wrapper import SD3PipelineWrapper
 
@@ -366,6 +384,7 @@ def run_sd3_tds(opts: dict):
     diverse_folder.mkdir(parents=True, exist_ok=True)
 
     records = []
+    diag_summaries = []
     prompt_offset = cfg.get("prompt_offset", 0)
 
     for p_idx, prompt in enumerate(prompts):
@@ -378,6 +397,24 @@ def run_sd3_tds(opts: dict):
 
             x0 = wrapper.get_initial_latents(seed=seed)
             result = sampler.run(x0, prompt_embeds, pooled_embeds, seed=seed)
+
+            disp = _dispersion_stats(result["particles"])
+            trace = result["diag"]["trace"]
+            avg_cap_hit = (
+                sum(t["cap_hit_rate"] for t in trace) / len(trace) if trace else None
+            )
+            print(f"  [TDS-diag] mean_pairwise_dist={disp['mean_pairwise_dist']:.4f} "
+                  f"(relative={disp['mean_relative_dist']:.4%})  "
+                  f"avg_cap_hit_rate={avg_cap_hit if avg_cap_hit is None else f'{avg_cap_hit:.2%}'}  "
+                  f"rho_star={result['diag']['rho_star']}")
+
+            diag_summaries.append({
+                "prompt_idx": global_idx, "seed": seed,
+                "dispersion": disp,
+                "avg_cap_hit_rate": avg_cap_hit,
+                "rho_star": result["diag"]["rho_star"],
+                "trace": trace,   # full per-step S/D/cap history for this seed
+            })
 
             for i, particle_latents in enumerate(result["particles"]):
                 out_path = diverse_folder / f"{global_idx + 1}_seed{seed}_particle{i}{base_out.suffix}"
@@ -408,6 +445,7 @@ def run_sd3_tds(opts: dict):
         },
         "seeds": list(seeds), "n_prompts": len(prompts), "prompt_offset": prompt_offset,
         "records": records,
+        "diag_summaries": diag_summaries,
     }
     with open(diverse_folder / f"records_offset{prompt_offset}.json", "w") as f:
         json.dump(meta, f, indent=1, default=str)
