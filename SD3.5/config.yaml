@@ -21,7 +21,7 @@ seeds:
 # ── Prompts ───────────────────────────────────────────────────────────
 # If prompts_file is set, prompts are loaded from that external YAML file
 # (must contain a top-level `prompts:` list) instead of the inline list below.
-prompts_file: "prompts.yaml"
+prompts_file: "/kaggle/working/files/SD3.5/prompts.yaml"
 
 # Inline fallback (used only if prompts_file is unset/missing):
 negative_prompt: "blurry, low quality, ugly, deformed"
