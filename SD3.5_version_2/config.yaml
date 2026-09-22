@@ -79,23 +79,13 @@ peakback:
   original_output_dir: "outputs/original"
   save_original: true
 
-# ── TDS (Thermodynamic Dispersion Sampler) ───────────────────────────
-# Only temperature, agitation_gain, kde_bandwidth and the window are meant
-# to be swept. pressure_exponent/agitation_exponent/mobility are fixed by
-# theory (see method section) and exposed only for ablation.
-tds:
-  num_particles:       5      # N — copies generated jointly per prompt/seed
-  kde_bandwidth:        null   # h — null = auto (SVGD median heuristic, recomputed every step)
-  pressure_exponent:   1.0    # gamma — fixed: ideal-gas equation of state (ablate only)
-  agitation_exponent:  1.0    # beta  — fixed: linear crowding->noise coupling (ablate only)
-  mobility:            1.0    # eta   — fixed: folded into temperature via D0 = eta*T
-  temperature:         0.5    # T     — MAIN knob: overall dispersion strength (D0 = eta*T)
-  agitation_gain:      2.0    # alpha — MAIN knob: crowding->noise coupling strength
-  symmetry_break_std:  0.02   # epsilon_init — per-element std added to break initial symmetry
-  window_start_frac:   0.0    # TDS active from this fraction of the trajectory...
-  window_end_frac:     0.4    # ...through this fraction (early/high-sigma steps)
-  max_step_frac:       0.05   # safety clamp: per-step nudge <= this fraction of ||x_i||
-  diverse_output_dir:  "outputs/diverse_tds"
+ugile:
+  theta_max:    0.3     # dial this, not escape_scale, for diversity vs. quality
+  escape_scale: 3.0      # keep — just ensures the clamp is the binding constraint
+  noise_scale:  8.0
+  max_eps_frac: 0.02
+  original_output_dir: "outputs/original"
+  save_original:       true
 
 # ── PeakBack swap example ────────────────────────────────────────────
 # model_name: "sd3_peakback"
@@ -104,7 +94,3 @@ tds:
 # ── ONLB swap example ────────────────────────────────────────────────
 # model_name: "sd3_onlb"
 # model_id:   "stabilityai/stable-diffusion-3-medium-diffusers"
-
-# ── TDS swap example ──────────────────────────────────────────────────
-# model_name: "sd3_tds"
-# model_id:   "stabilityai/stable-diffusion-3.5-medium"
