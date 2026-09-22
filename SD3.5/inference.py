@@ -9,13 +9,14 @@ Usage:
     python inference.py --config config.yaml --prompt "a red apple" --output out.png
 
 Model is selected via config.yaml:
-    model_name: "flux"          # flux | sd | sd3 | sd3_onlb | sd3_peakback | sana | lumina | janus | cogvideo | mini_gemini
+    model_name: "flux"          # flux | sd | sd3 | sd3_onlb | sd3_peakback | sd3_tds | sana | lumina | janus | cogvideo | mini_gemini
 
-Multi-seed (sd3_onlb, sd3_peakback only):
+Multi-seed (sd3_onlb, sd3_peakback, sd3_tds only):
     Add a `seeds` list to config.yaml.  The model is loaded once and each seed
-    generates one independent image (sd3_onlb) or one base + J diverse branches
-    (sd3_peakback, see the `peakback:` config block). Per-seed/branch diagnostics
-    are reported at the end.
+    generates one independent image (sd3_onlb), one base + J diverse branches
+    (sd3_peakback, see the `peakback:` config block), or one N-particle
+    thermodynamic-dispersion batch (sd3_tds, see the `tds:` config block).
+    Per-seed/branch/particle diagnostics are reported at the end.
 """
 
 import argparse
@@ -40,12 +41,14 @@ try:
 except ImportError:
     _PEAKBACK_AVAILABLE = False
 
-# UGILE import — graceful fallback if file not yet on path
+# TDS import — graceful fallback if file not yet on path
+# NOTE: latent_escape_sampler.py was repurposed for the Thermodynamic
+# Dispersion Sampler (TDS); it now exposes run_sd3_tds, not run_sd3_ugile.
 try:
-    from latent_escape_sampler import run_sd3_ugile as _run_sd3_ugile
-    _UGILE_AVAILABLE = True
+    from latent_escape_sampler import run_sd3_tds as _run_sd3_tds
+    _TDS_AVAILABLE = True
 except ImportError:
-    _UGILE_AVAILABLE = False
+    _TDS_AVAILABLE = False
 
 
 # ══════════════════════════════════════════════════════════════════════ #
@@ -540,9 +543,9 @@ def main():
     if _PEAKBACK_AVAILABLE:
         MODEL_REGISTRY["sd3_peakback"] = _run_sd3_peakback
 
-    # Register UGILE runner if available
-    if _UGILE_AVAILABLE:
-        MODEL_REGISTRY["sd3_ugile"] = _run_sd3_ugile
+    # Register TDS runner if available
+    if _TDS_AVAILABLE:
+        MODEL_REGISTRY["sd3_tds"] = _run_sd3_tds
 
     model_name = opts["model_name"].lower().strip()
 
@@ -552,7 +555,7 @@ def main():
     print(f"[INFO] Device   : {opts['device']}")
     print(f"[INFO] Output   : {opts['output']}")
 
-    if model_name in ("sd3_onlb", "sd3_peakback", "sd3_ugile"):
+    if model_name in ("sd3_onlb", "sd3_peakback", "sd3_tds"):
         seeds = opts["seeds"]
         print(f"[INFO] Seeds    : {seeds}  ({len(seeds)} image(s) to generate)")
 
