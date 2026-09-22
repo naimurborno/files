@@ -1,5 +1,5 @@
 # ── Active model ────────────────────────────────────────────────────
-model_name: "sd3_pg_matched"
+model_name: "sd3_pg"
 model_id:   "stabilityai/stable-diffusion-3.5-medium"
 
 
