@@ -94,7 +94,7 @@ tds:
   symmetry_break_std:  0.02   # epsilon_init — per-element std added to break initial symmetry
   window_start_frac:   0.0    # TDS active from this fraction of the trajectory...
   window_end_frac:     0.4    # ...through this fraction (early/high-sigma steps)
-  max_step_frac:       0.05   # safety clamp: per-step nudge <= this fraction of ||x_i||
+  max_step_frac:       1  # safety clamp: per-step nudge <= this fraction of ||x_i||
   diverse_output_dir:  "outputs/diverse_tds"
 
 # ── PeakBack swap example ────────────────────────────────────────────
