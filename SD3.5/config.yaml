@@ -13,10 +13,10 @@ seed:   41       # fallback seed used by non-ONLB models and --seed CLI override
 # Remove or leave empty to fall back to the single `seed` value above.
 seeds:
   - 41
-  # - 42
-  # - 43
-  # - 44
-  # - 45 
+  - 42
+  - 43
+  - 44
+  - 45 
 
 # ── Prompts ───────────────────────────────────────────────────────────
 # If prompts_file is set, prompts are loaded from that external YAML file
@@ -94,8 +94,39 @@ tds:
   symmetry_break_std:  0.02   # epsilon_init — per-element std added to break initial symmetry
   window_start_frac:   0.0    # TDS active from this fraction of the trajectory...
   window_end_frac:     0.4    # ...through this fraction (early/high-sigma steps)
-  max_step_frac:       0.09  # safety clamp: per-step nudge <= this fraction of ||x_i||
+  max_step_frac:       0.05   # safety clamp: per-step nudge <= this fraction of ||x_i||
   diverse_output_dir:  "outputs/diverse_tds"
+
+# ── PG ablation controls (see control_samplers.py) ───────────────────
+# sd3_pg: pure deterministic gradient repulsion, NO noise term at all.
+# sd3_pg_matched: PG drift + a time-only D(t) noise schedule (same for
+#   every particle regardless of local crowding), calibrated to match a
+#   real TDS run's total noise mass — set pg_matched.matched_from to that
+#   run's records_offsetN.json (must have been produced with the
+#   diagnostic-enabled latent_escape_sampler.py, i.e. contains
+#   diag_summaries[i].trace with D_mean per step).
+# Both share the `pg:` block below for their common knobs (kde_bandwidth,
+# mobility, window, clamp, etc — same fields/meaning as the tds: block,
+# minus temperature/agitation_gain/agitation_exponent, which don't apply
+# to a deterministic or time-only-noise sampler).
+pg:
+  num_particles:       5
+  kde_bandwidth:        null
+  pressure_exponent:   1.0
+  mobility:            1.0
+  symmetry_break_std:  0.02
+  window_start_frac:   0.0
+  window_end_frac:     0.4
+  max_step_frac:       0.05   # keep identical to tds.max_step_frac for a fair comparison
+  diverse_output_dir:  "outputs/diverse_pg"   # sd3_pg_matched uses pg_matched.diverse_output_dir instead — the two never collide
+
+pg_matched:
+  matched_from:         "outputs/diverse_tds/records_offset0.json"  # a completed sd3_tds run
+  matched_prompt_idx:   null   # null = ignored when average_over_all: true
+  matched_seed:         null   # null = ignored when average_over_all: true
+  average_over_all:     true   # true: average D(t) across every (prompt, seed) in that file
+                                # false: match one specific run exactly (set prompt_idx/seed above)
+  diverse_output_dir:  "outputs/diverse_pg_matched"
 
 # ── PeakBack swap example ────────────────────────────────────────────
 # model_name: "sd3_peakback"

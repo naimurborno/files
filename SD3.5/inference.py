@@ -9,13 +9,16 @@ Usage:
     python inference.py --config config.yaml --prompt "a red apple" --output out.png
 
 Model is selected via config.yaml:
-    model_name: "flux"          # flux | sd | sd3 | sd3_onlb | sd3_peakback | sd3_tds | sana | lumina | janus | cogvideo | mini_gemini
+    model_name: "flux"          # flux | sd | sd3 | sd3_onlb | sd3_peakback | sd3_tds | sd3_pg | sd3_pg_matched | sana | lumina | janus | cogvideo | mini_gemini
 
-Multi-seed (sd3_onlb, sd3_peakback, sd3_tds only):
+Multi-seed (sd3_onlb, sd3_peakback, sd3_tds, sd3_pg, sd3_pg_matched only):
     Add a `seeds` list to config.yaml.  The model is loaded once and each seed
     generates one independent image (sd3_onlb), one base + J diverse branches
-    (sd3_peakback, see the `peakback:` config block), or one N-particle
-    thermodynamic-dispersion batch (sd3_tds, see the `tds:` config block).
+    (sd3_peakback, see the `peakback:` config block), one N-particle
+    thermodynamic-dispersion batch (sd3_tds, see the `tds:` config block), or
+    one N-particle pure-gradient-repulsion / matched-noise-mass ablation
+    batch (sd3_pg / sd3_pg_matched, see the `pg:` / `pg_matched:` config
+    blocks — these are TDS's ablation controls, see control_samplers.py).
     Per-seed/branch/particle diagnostics are reported at the end.
 """
 
@@ -49,6 +52,14 @@ try:
     _TDS_AVAILABLE = True
 except ImportError:
     _TDS_AVAILABLE = False
+
+# PG control imports — ablation baselines for TDS (see control_samplers.py)
+try:
+    from control_samplers import run_sd3_pg as _run_sd3_pg
+    from control_samplers import run_sd3_pg_matched as _run_sd3_pg_matched
+    _PG_CONTROLS_AVAILABLE = True
+except ImportError:
+    _PG_CONTROLS_AVAILABLE = False
 
 
 # ══════════════════════════════════════════════════════════════════════ #
@@ -547,6 +558,11 @@ def main():
     if _TDS_AVAILABLE:
         MODEL_REGISTRY["sd3_tds"] = _run_sd3_tds
 
+    # Register PG ablation controls if available
+    if _PG_CONTROLS_AVAILABLE:
+        MODEL_REGISTRY["sd3_pg"]         = _run_sd3_pg
+        MODEL_REGISTRY["sd3_pg_matched"] = _run_sd3_pg_matched
+
     model_name = opts["model_name"].lower().strip()
 
     print(f"[INFO] Model    : {opts['model_name']} ({opts['model_id']})")
@@ -555,7 +571,7 @@ def main():
     print(f"[INFO] Device   : {opts['device']}")
     print(f"[INFO] Output   : {opts['output']}")
 
-    if model_name in ("sd3_onlb", "sd3_peakback", "sd3_tds"):
+    if model_name in ("sd3_onlb", "sd3_peakback", "sd3_tds", "sd3_pg", "sd3_pg_matched"):
         seeds = opts["seeds"]
         print(f"[INFO] Seeds    : {seeds}  ({len(seeds)} image(s) to generate)")
 
